@@ -1,0 +1,112 @@
+# =====================================================================
+# LüMobil Reporting — eigener Stack neben dem Hilfecenter
+# =====================================================================
+# Nutzt den postgres-Container des Hilfecenter-Stacks über dessen Netz mit.
+# Kein eigener PostgreSQL, keine doppelte Datenhaltung.
+#
+#   docker compose up -d                 Metabase und Ticket-API starten
+#   docker compose run --rm import       Dumps einspielen (sonst per Timer)
+#   docker compose run --rm sicherung    lue_reporting + metabase_app sichern
+#
+# Konfiguration: .env neben dieser Datei (Vorlage: server/reporting.env.beispiel)
+# Erreichbarkeit:
+#   Ticket-API  nur im Docker-Netz unter  http://postgrest:3000
+#   Metabase    nur auf 127.0.0.1:3001 — öffentlich sind über Caddy
+#               ausschließlich die Einbettungspfade (server/Caddyfile-reporting.example)
+# =====================================================================
+name: luemobil-reporting
+
+services:
+  # --- Ticket-API: Ticketauskunft für das Hilfecenter ------------------
+  postgrest:
+    image: postgrest/postgrest:v16.3
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://api_zugang:${API_DB_PASSWORT:?API_DB_PASSWORT fehlt in .env}@${PG_HOST:-postgres}:5432/lue_reporting
+      PGRST_DB_SCHEMAS: api
+      # Prüft vor jeder Anfrage, ob das Token registriert und nicht gesperrt ist
+      PGRST_DB_PRE_REQUEST: protokoll.token_pruefen
+      PGRST_DB_MAX_ROWS: 500
+      PGRST_DB_POOL: 5
+      PGRST_DB_CHANNEL_ENABLED: "true"
+      PGRST_JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
+      PGRST_JWT_AUD: tickets-api
+      PGRST_SERVER_PORT: 3000
+      PGRST_OPENAPI_MODE: disabled
+      PGRST_LOG_LEVEL: warn
+      # Kein PGRST_DB_ANON_ROLE: ohne gültiges Token gibt es nichts.
+    # Bewusst keine ports: — erreichbar nur im Docker-Netz
+    networks: [hilfecenter]
+
+  # --- Metabase: Dashboards --------------------------------------------
+  metabase:
+    image: metabase/metabase:v0.63.18
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: ${PG_HOST:-postgres}
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase_app
+      MB_DB_USER: metabase_app
+      MB_DB_PASS: ${MB_DB_PASSWORT:?MB_DB_PASSWORT fehlt in .env}
+      MB_SITE_URL: ${MB_SITE_URL:?MB_SITE_URL fehlt in .env}
+      # Verschlüsselt die gespeicherten Datenbankzugänge. Nie ändern oder verlieren.
+      MB_ENCRYPTION_SECRET_KEY: ${MB_ENCRYPTION_SECRET_KEY:?MB_ENCRYPTION_SECRET_KEY fehlt in .env}
+      # Einbettung ins Hilfecenter
+      MB_ENABLE_EMBEDDING_STATIC: "true"
+      MB_EMBEDDING_SECRET_KEY: ${MB_EMBEDDING_SECRET_KEY:?MB_EMBEDDING_SECRET_KEY fehlt in .env}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      JAVA_TIMEZONE: ${TZ:-Europe/Berlin}
+      TZ: ${TZ:-Europe/Berlin}
+    # Nur lokal: Caddy reicht von außen ausschließlich /embed, /api/embed, /app durch.
+    # Admins erreichen die Oberfläche über einen SSH-Tunnel auf diesen Port.
+    ports:
+      - '127.0.0.1:${MB_PORT:-3001}:3000'
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:3000/api/health']
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    networks: [hilfecenter]
+
+  # --- Nächtlicher Import (Einmal-Lauf, gestartet vom systemd-Timer) ----
+  import:
+    build: ./import
+    profiles: ['werkzeuge']
+    environment:
+      IMPORT_CONF: /etc/luemobil/import.conf
+      PGHOST: ${PG_HOST:-postgres}
+      PGUSER: ${PG_USER:-luemobil}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - ${IMPORT_CONF_DATEI:-./server/import.conf}:/etc/luemobil/import.conf:ro
+      - ${DUMPS_VERZEICHNIS:-/srv/luemobil/dumps}:/srv/luemobil/dumps
+      - ${ARCHIV_VERZEICHNIS:-/srv/luemobil/archiv}:/srv/luemobil/archiv
+      - ${FEHLER_VERZEICHNIS:-/srv/luemobil/fehler}:/srv/luemobil/fehler
+      - ${STATUS_VERZEICHNIS:-/var/lib/luemobil-import}:/var/lib/luemobil-import
+    networks: [hilfecenter]
+
+  # --- Sicherung von lue_reporting und metabase_app ---------------------
+  sicherung:
+    build: ./import
+    profiles: ['werkzeuge']
+    entrypoint: ['/opt/luemobil/sichern.sh']
+    environment:
+      PGHOST: ${PG_HOST:-postgres}
+      PGUSER: ${PG_USER:-luemobil}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
+      AUFBEWAHRUNG_TAGE: ${SICHERUNG_TAGE:-30}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - ${SICHERUNG_VERZEICHNIS:-/var/backups/luemobil}:/sicherung
+    networks: [hilfecenter]
+
+networks:
+  # Das Netz des Hilfecenter-Stacks — dort läuft der postgres-Container.
+  # Name prüfen mit:  docker network ls
+  hilfecenter:
+    external: true
+    name: ${HILFECENTER_NETZ:-luemobil-hilfecenter_default}

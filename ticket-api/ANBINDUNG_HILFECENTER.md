@@ -81,8 +81,9 @@ Grenzen: 30 Anfragen pro Minute je Token (kurzzeitig bis zu 10 zusätzlich), hö
   (z. B. `LUEMOBIL_API_TOKEN`).
 - **Token nicht loggen**, auch nicht in Fehlermeldungen. Das Gleiche gilt für die gesuchte
   E-Mail-Adresse in Debug-Logs.
-- **Zertifikat prüfen**, nie `verify=false` oder `-k`. Im Dev-System wird dafür die mitgelieferte
-  `ca.crt` als vertrauenswürdig hinterlegt, in Produktion ist das nicht nötig.
+- **Zertifikat prüfen**, nie `verify=false` oder `-k` — gilt für alle Aufrufe über HTTPS. Im
+  Dev-System wird dafür die mitgelieferte `ca.crt` hinterlegt. In Produktion läuft der Aufruf
+  über das Docker-Netz (`http://postgrest:3000`), das den Server nie verlässt.
 - **Token-Wechsel einplanen:** Tokens laufen ab. Das Token muss sich ohne neues Deployment
   austauschen lassen.
 
@@ -147,12 +148,18 @@ export async function ticketsFuerEmail(email, bearbeiter) {
 
 ## Zugangsdaten
 
-| | Dev | Produktion |
+| | Dev (lokal) | Produktion (Server) |
 |---|---|---|
-| `LUEMOBIL_API_URL` | `https://tickets-api.local:8443` | folgt |
-| `LUEMOBIL_API_TOKEN` | wird separat und sicher übergeben | wird separat und sicher übergeben |
-| `LUEMOBIL_API_CA` | `ca.crt` (wird mitgeliefert) | entfällt, öffentliches Zertifikat |
-| Freigegebene IP | muss uns mitgeteilt werden | muss uns mitgeteilt werden |
+| `LUEMOBIL_API_URL` | `https://tickets-api.local:8443` | **`http://postgrest:3000`** — im selben Docker-Netz |
+| `LUEMOBIL_API_TOKEN_FILE` | Datei in `secrets/` | Datei in `secrets/`, Austausch wirkt sofort |
+| `LUEMOBIL_API_CA` | `ca.crt` (wird mitgeliefert) | entfällt |
+| Freigegebene IP | entfällt | entfällt |
+
+**In Produktion läuft der Aufruf nicht über das Internet.** Die Ticket-API ist ein Container
+im selben Docker-Netz wie die Hilfecenter-App und hat keinen öffentlichen Zugang. Damit
+entfallen Zertifikat, IP-Freigabe und Rate-Limit des Proxys — Token, Sperrliste, Protokoll
+und die Beschränkung auf einen einzigen lesenden Endpunkt bleiben unverändert.
+Voraussetzung: Beide Stacks nutzen dasselbe Docker-Netz.
 
 **Dev-Daten sind anonymisiert.** Echte Adressen funktionieren trotzdem, weil die API sie intern
 umrechnet. Die Beträge und Produkte sind echt, Namen gibt die API ohnehin nicht zurück.

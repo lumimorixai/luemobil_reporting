@@ -1,0 +1,43 @@
+# Ergänzung für /etc/caddy/Caddyfile — Dashboards für das Hilfecenter.
+# Danach: sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+#
+# Metabase läuft im Reporting-Stack und ist nur auf 127.0.0.1:3001 erreichbar.
+# Öffentlich gibt es ausschließlich die Einbettungspfade — Anmeldeseite,
+# Admin-Oberfläche und übrige API bleiben draußen (lokal im Browser geprüft).
+# Administratoren: ssh -L 3001:127.0.0.1:3001 <server>, dann http://localhost:3001
+
+reporting.swl-innovation.de {
+    # Nur diese drei Pfade führen zu Metabase
+    @einbettung path /embed/* /api/embed/* /app/*
+    handle @einbettung {
+        reverse_proxy 127.0.0.1:3001
+    }
+
+    # Alles andere gibt es hier nicht
+    handle {
+        respond 404
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Cache-Control "no-store"
+        # Metabase selbst erlaubt jede einbettende Seite. Diese Richtlinie gilt
+        # zusätzlich und lässt nur das Hilfecenter zu. Weitere Adressen (Test,
+        # Entwicklung) mit Leerzeichen anhängen.
+        Content-Security-Policy "frame-ancestors https://luemobil.swl-innovation.de"
+        # X-Frame-Options hier NICHT setzen — das würde die Einbettung verbieten.
+        -Server
+    }
+
+    # Das Token steht im Pfad: im Log durch … ersetzen
+    log {
+        output file /var/log/caddy/reporting.log
+        format filter {
+            wrap console
+            fields {
+                request>uri regexp "/((api/)?embed)/(dashboard|question)/[^/?]+" "/$1/$3/…"
+            }
+        }
+    }
+}

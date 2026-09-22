@@ -13,7 +13,8 @@ behandelt wird.
 | Ordner | Inhalt |
 |---|---|
 | [`import/`](import/) | Nächtlicher Import der Dumps (`import.sh`) und sein Abnahmetest |
-| [`server/`](server/) | Alles für den Server: systemd-Dienste, nginx, SFTP-Zugang, Datenbankrollen |
+| [`compose.yml`](compose.yml) | Der Reporting-Stack: Ticket-API, Metabase, Import, Sicherung |
+| [`server/`](server/) | Alles für den Server: systemd-Timer, Caddy, SFTP-Zugang, Datenbankrollen |
 | [`ticket-api/`](ticket-api/) | Ticketauskunft für das Hilfecenter: Datenbankteil, Tokens, Tests |
 | [`metabase-setup/`](metabase-setup/) | Reporting-Sichten, Metabase-Demo, Einbettung der Dashboards |
 | [`dashboard-screens/`](dashboard-screens/) | Bildschirmfotos der vier Dashboards |
@@ -27,18 +28,24 @@ behandelt wird.
 
 ## Auf den Produktivserver bringen
 
+Der Reporting-Teil läuft als eigener Docker-Stack neben dem Hilfecenter und nutzt dessen
+PostgreSQL-Container mit:
+
 ```bash
 git clone <dieses-repository> /opt/luemobil
+cd /opt/luemobil && cp server/reporting.env.beispiel .env   # Passwörter eintragen
+docker compose up -d                 # Ticket-API (nur im Docker-Netz) und Metabase
+docker compose run --rm import       # Dumps einspielen (danach per systemd-Timer)
 ```
 
-Danach das Betriebshandbuch ab Abschnitt 4 abarbeiten. Nicht im Repository enthalten und
-deshalb auf dem Server zu besorgen:
+Die vollständige Reihenfolge steht im Betriebshandbuch, Abschnitt 4. Für einen Server ohne
+Docker beschreibt Anhang A die Variante mit systemd-Diensten. Nicht im Repository enthalten:
 
 | Fehlt | Woher |
 |---|---|
-| `metabase.jar`, PostgREST | werden im Handbuch heruntergeladen (4.1, 4.8.2) |
-| Passwörter, Schlüssel, Zertifikate | werden auf dem Server erzeugt (4.7, 4.8) und gehören in den Tresor |
-| Dumps `kk_*-PROD-*.sql` | liefert das Quellsystem per SFTP (4.4) |
+| Docker-Abbilder (Metabase, PostgREST, PostgreSQL) | zieht `docker compose` selbst |
+| Passwörter und Schlüssel | werden auf dem Server erzeugt (4.3, 4.6) und gehören in den Tresor |
+| Dumps `kk_*-PROD-*.sql` | liefert das Quellsystem per SFTP (4.2) |
 
 **Nie einchecken:** Dumps, Schlüssel, Passwörter, die Metabase-Datei `metabase-app-db.mv.db`.
 Die `.gitignore` hält das ab — bei neuen Dateien trotzdem selbst prüfen.

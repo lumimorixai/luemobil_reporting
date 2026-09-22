@@ -33,3 +33,6 @@ metabase-setup/einbettung_test.html
 
 # --- Betriebssystem ---------------------------------------------------
 .DS_Store
+
+# Von Metabase beim Start angelegt
+plugins/

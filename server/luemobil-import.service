@@ -1,26 +1,14 @@
 # /etc/systemd/system/luemobil-import.service
-# Einmaliger Importlauf. Gestartet vom Timer, manuell: systemctl start luemobil-import
+# Einmaliger Importlauf im Reporting-Stack. Gestartet vom Timer,
+# manuell: systemctl start luemobil-import
 [Unit]
 Description=LüMobil: Datenbank-Dumps importieren
-After=postgresql.service
-Requires=postgresql.service
+After=docker.service
+Requires=docker.service
 OnFailure=luemobil-meldung@%n.service
 
 [Service]
 Type=oneshot
-User=postgres
-Group=postgres
-SupplementaryGroups=luemobil-dumps
-Environment=IMPORT_CONF=/etc/luemobil/import.conf
-ExecStart=/opt/luemobil/import/import.sh
+WorkingDirectory=/opt/luemobil
+ExecStart=/usr/bin/docker compose run --rm import
 TimeoutStartSec=2h
-Nice=10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=7
-
-# Härtung: darf nur in seine eigenen Verzeichnisse schreiben
-ProtectSystem=strict
-ReadWritePaths=/srv/luemobil /var/lib/luemobil-import /run/postgresql
-ProtectHome=yes
-PrivateTmp=yes
-NoNewPrivileges=yes

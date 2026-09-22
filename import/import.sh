@@ -32,6 +32,10 @@ CONF="${IMPORT_CONF:-/etc/luemobil/import.conf}"
 : "${MIN_KUNDEN:=100}" "${MIN_BESTELLUNGEN:=100}" "${MAX_RUECKGANG_PROZENT:=5}"
 : "${RUHEZEIT_MINUTEN:=2}" "${WARTEN_AUF_PARTNER_MINUTEN:=360}"
 : "${ARCHIV_TAGE:=7}" "${MAX_ALTER_STUNDEN:=30}"
+# Rollen, die in den Dumps als Eigentümer vorkommen. Fehlen sie im Zielcluster
+# (z. B. weil der Superuser dort "luemobil" heißt), legt der Import sie ohne
+# Anmelderecht an — sonst scheitert jedes ALTER ... OWNER TO im Dump.
+: "${DUMP_ROLLEN:=postgres}"
 : "${RAUCHTEST_SQL:=SELECT count(*) FROM rpt.bestellposition}"
 
 PSQL=(psql -X -q -v ON_ERROR_STOP=1)
@@ -168,6 +172,16 @@ log "Importiere Paar vom $TAG_MPSWL: $(basename "$F_MPSWL"), $(basename "$F_SWL"
 SERVER_VERSION=$(sql postgres "SHOW server_version_num")
 [ "$SERVER_VERSION" -ge 170000 ] || fehler "PostgreSQL 17 oder neuer nötig, gefunden: $SERVER_VERSION."
 
+rollen_sicherstellen() {
+  local rolle
+  for rolle in $DUMP_ROLLEN; do
+    if [ "$(sql postgres "SELECT count(*) FROM pg_roles WHERE rolname = '$rolle'")" = 0 ]; then
+      "${PSQL[@]}" -d postgres -c "CREATE ROLE \"$rolle\" NOLOGIN"
+      log "  Rolle $rolle angelegt (kommt in den Dumps als Eigentümer vor, kein Login)"
+    fi
+  done
+}
+
 einspielen() {  # einspielen <ziel-db> <datei>
   local ziel="$1_neu" datei="$2" start=$SECONDS
   "${PSQL[@]}" -d postgres -c "DROP DATABASE IF EXISTS \"$ziel\" WITH (FORCE)"
@@ -179,6 +193,7 @@ einspielen() {  # einspielen <ziel-db> <datei>
   vacuumdb -q --analyze-only -d "$ziel"
   log "  $ziel eingespielt ($((SECONDS - start)) s)"
 }
+rollen_sicherstellen
 einspielen "$DB_MPSWL" "$F_MPSWL"
 einspielen "$DB_SWL"   "$F_SWL"
 

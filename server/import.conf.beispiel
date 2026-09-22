@@ -1,18 +1,22 @@
-# /etc/luemobil/import.conf — Konfiguration für /opt/luemobil/import/import.sh
-# Rechte: root:postgres 640
+# /etc/luemobil/import.conf — Konfiguration für den Import
+# Wird in den Container gemountet (siehe compose.yml). Rechte: root:root 644.
+# Die Pfade sind die IM CONTAINER; worauf sie auf dem Server zeigen, steht in der .env.
 
 # --- Verzeichnisse ---------------------------------------------------
-EINGANG=/srv/luemobil/dumps/eingang      # hier legt der Lieferant die Dumps ab (SFTP)
-ARCHIV=/srv/luemobil/archiv              # erfolgreich importierte Dumps
-FEHLER=/srv/luemobil/fehler              # abgewiesene Dumps, zur Analyse
-STATUS=/var/lib/luemobil-import          # Sperre, Import-Register, letzter Status
+EINGANG=/srv/luemobil/dumps      # Eingang des Lieferanten (SFTP), im Container gemountet
+ARCHIV=/srv/luemobil/archiv      # erfolgreich importierte Dumps
+FEHLER=/srv/luemobil/fehler      # abgewiesene Dumps, zur Analyse
+STATUS=/var/lib/luemobil-import  # Sperre, Import-Register, letzter Status
 
 # --- Datenbanken -----------------------------------------------------
 DB_MPSWL=kk_mpswl
 DB_SWL=kk_swl
 DB_REPORTING=lue_reporting
-# Leer = lokaler Unix-Socket, Anmeldung per peer als Systembenutzer postgres
-PGHOST_IMPORT=
+# Verbindung kommt aus der Umgebung: PGHOST/PGUSER/PGPASSWORD in der .env.
+# Rollen, die in den Dumps als Eigentümer vorkommen (ALTER ... OWNER TO) und im
+# Zielcluster fehlen — dort heißt der Superuser luemobil —, legt der Import
+# ohne Anmelderecht an:
+DUMP_ROLLEN="postgres"
 
 # --- Plausibilität ---------------------------------------------------
 MIN_KUNDEN=1000                  # weniger Konten in kk_mpswl.customers = Fehler

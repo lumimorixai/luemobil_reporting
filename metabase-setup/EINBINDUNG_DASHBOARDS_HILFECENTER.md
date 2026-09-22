@@ -45,9 +45,13 @@ Seite „Kennzahlen“ ─────────▶ 1. Ist die Person angemeld
 
 | Wert | Beispiel | Hinweis |
 |---|---|---|
-| `METABASE_URL` | `https://reporting.luemobil.de` | Dev: wird mitgeteilt |
-| `METABASE_EMBED_SECRET` | 64 Hex-Zeichen | **Geheim.** Über den Passwort-Tresor, nicht per Mail. Wer ihn hat, kann jedes freigegebene Dashboard abrufen |
+| `METABASE_URL` | `https://reporting.swl-innovation.de` | Öffentliche Adresse — der **Browser** lädt das iframe von dort |
+| `METABASE_EMBED_SECRET` | 64 Hex-Zeichen, als Datei `secrets/metabase_embed_secret` | **Geheim.** Über den Passwort-Tresor, nicht per Mail. Wer ihn hat, kann jedes freigegebene Dashboard abrufen |
 | Dashboard-IDs | `6, 7, 8, 9` | siehe oben |
+
+Anders als die Ticket-API muss Metabase öffentlich erreichbar sein, weil der Browser das
+iframe lädt. Freigegeben sind aber nur die Einbettungspfade; Anmeldeseite, Admin-Oberfläche
+und die übrige Metabase-API antworten von außen mit `404`.
 
 Wir tragen die Adresse eures Hilfecenters (z. B. `https://hilfe.luemobil.de`) als
 einzige erlaubte einbettende Seite ein. Von anderen Seiten aus lassen sich die Dashboards
