@@ -155,10 +155,14 @@ install -d -o 70 -g 70 -m 750 /srv/luemobil/archiv /srv/luemobil/fehler \
                               /var/lib/luemobil-import /var/backups/luemobil
 
 # Der Import muss im Eingang aufräumen dürfen — Schreibrecht auf das VERZEICHNIS.
-# Eigentum und Rechte des Lieferanten bleiben unverändert:
+# Eigentum und Rechte des Lieferanten bleiben unverändert.
+# Reihenfolge beachten: chmod setzt die ACL-Maske zurück, also ZUERST chmod.
 apt install -y acl
-setfacl -m u:70:rwx /srv/sftp/tafreporting/upload
-getfacl -p /srv/sftp/tafreporting/upload | grep '^user:70'      # muss rwx zeigen
+chmod 750 /srv/sftp/tafreporting/upload
+setfacl -m u:70:rwx,m::rwx /srv/sftp/tafreporting/upload
+getfacl -p /srv/sftp/tafreporting/upload | grep '^user:70'
+#   richtig:  user:70:rwx
+#   falsch:   user:70:rwx  #effective:r-x   -> Maske kappt das Schreibrecht
 
 install -o root -g root -m 644 /opt/luemobil_reporting/server/import.conf.beispiel /etc/luemobil/import.conf
 nano /etc/luemobil/import.conf                      # MELDUNG_AN und Mindestmengen prüfen
@@ -476,6 +480,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 | `docker compose up` meldet „network … not found" | Netzname in der `.env` stimmt nicht, oder der Hilfecenter-Stack läuft nicht | `docker network ls`, `HILFECENTER_NETZ` anpassen |
 | Import: `role "postgres" does not exist` | `DUMP_ROLLEN` in der `import.conf` leer | Eintrag `DUMP_ROLLEN="postgres"` ergänzen (siehe 4.4) |
 | Import: „… ist nicht lesbar" | Dump wurde von Hand kopiert und hat `600`; der Lieferant lädt sonst mit `644` hoch | `chmod 644` auf die Datei — das Verzeichnis bleibt mit `750` geschlossen |
+| Import: `permission denied` beim Verschieben der Dumps, `getfacl` zeigt `#effective:r-x` | Ein `chmod` nach dem `setfacl` hat die ACL-Maske zurückgesetzt | `setfacl -m u:70:rwx,m::rwx <eingang>` (4.2) |
 | Import: `permission denied` beim Verschieben der Dumps | Verzeichnisse gehören nicht uid 70 | `chown -R 70:70 /srv/luemobil/archiv /srv/luemobil/fehler /var/lib/luemobil-import`, ACL für den Eingang (4.2) |
 | App meldet, die Ticket-API sei nicht erreichbar | Beide Stacks nicht im selben Netz | `docker inspect <app-container> -f '{{json .NetworkSettings.Networks}}'` mit dem postgrest-Container vergleichen |
 | Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil_reporting/.env` prüfen, `docker compose up -d metabase` |

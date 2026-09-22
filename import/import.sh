@@ -105,6 +105,16 @@ aufraeumen() {
 }
 trap aufraeumen EXIT
 
+archivieren() {  # Dumps wegräumen — misslingt das, ist es nur eine Warnung
+  if mv "$@" "$ARCHIV/" 2>/dev/null; then
+    log "  Dumps archiviert"
+  else
+    log "  WARNUNG: Dumps konnten nicht nach $ARCHIV verschoben werden — sie bleiben liegen."
+    log "  WARNUNG: Hat der Import (uid $(id -u)) Schreibrecht im Eingang? Bei ACL auch die"
+    log "  WARNUNG: Maske prüfen: getfacl zeigt sonst 'user:$(id -u):rwx #effective:r-x'."
+  fi
+}
+
 # --- 1. Dump-Paar finden ---------------------------------------------
 neuester() {  # neuester <prefix> -> Pfad der neuesten passenden Datei
   ls -1 "$EINGANG" 2>/dev/null | grep -E "^$1-PROD-[0-9]{14}\.sql(\.gz)?$" | sort | tail -1 | sed "s|^|$EINGANG/|" || true
@@ -165,8 +175,8 @@ done
 
 H_MPSWL=$(sha256 "$F_MPSWL"); H_SWL=$(sha256 "$F_SWL")
 if grep -q "$H_MPSWL" "$STATUS/importiert.txt" && grep -q "$H_SWL" "$STATUS/importiert.txt"; then
-  log "Dieses Paar wurde bereits importiert — archiviert, nichts weiter zu tun."
-  mv "$F_MPSWL" "$F_SWL" "$ARCHIV/"; PAAR=(); exit 0
+  log "Dieses Paar wurde bereits importiert — nichts weiter zu tun."
+  PAAR=(); archivieren "$F_MPSWL" "$F_SWL"; exit 0
 fi
 log "Importiere Paar vom $TAG_MPSWL: $(basename "$F_MPSWL"), $(basename "$F_SWL")"
 
@@ -287,12 +297,7 @@ echo "$TAG_SWL $H_SWL $(basename "$F_SWL")"       >> "$STATUS/importiert.txt"
 # Import als gescheitert darzustellen. Die Dumps bleiben dann liegen und werden
 # beim nächsten Lauf als "bereits importiert" erkannt.
 PAAR=()
-if mv "$F_MPSWL" "$F_SWL" "$ARCHIV/" 2>/dev/null; then
-  log "  Dumps archiviert"
-else
-  log "  WARNUNG: Dumps konnten nicht nach $ARCHIV verschoben werden."
-  log "  WARNUNG: Fehlt dem Import (uid $(id -u)) das Schreibrecht im Eingang? Sie bleiben liegen."
-fi
+archivieren "$F_MPSWL" "$F_SWL"
 
 cat > "$STATUS/letzter_import.json" <<EOF
 {"zeitpunkt": "$(date '+%Y-%m-%dT%H:%M:%S%z')", "dump_tag": "$TAG_MPSWL",
