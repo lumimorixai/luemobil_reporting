@@ -475,6 +475,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 | API liefert `500` nach Arbeiten an den Sichten | Rechte auf `rpt`-Sichten verloren (siehe Achtung in 4.6) | 4.7.1 erneut ausführen |
 | `docker compose up` meldet „network … not found" | Netzname in der `.env` stimmt nicht, oder der Hilfecenter-Stack läuft nicht | `docker network ls`, `HILFECENTER_NETZ` anpassen |
 | Import: `role "postgres" does not exist` | `DUMP_ROLLEN` in der `import.conf` leer | Eintrag `DUMP_ROLLEN="postgres"` ergänzen (siehe 4.4) |
+| Import: „… ist nicht lesbar" | Dump wurde von Hand kopiert und hat `600`; der Lieferant lädt sonst mit `644` hoch | `chmod 644` auf die Datei — das Verzeichnis bleibt mit `750` geschlossen |
 | Import: `permission denied` beim Verschieben der Dumps | Verzeichnisse gehören nicht uid 70 | `chown -R 70:70 /srv/luemobil/archiv /srv/luemobil/fehler /var/lib/luemobil-import`, ACL für den Eingang (4.2) |
 | App meldet, die Ticket-API sei nicht erreichbar | Beide Stacks nicht im selben Netz | `docker inspect <app-container> -f '{{json .NetworkSettings.Networks}}'` mit dem postgrest-Container vergleichen |
 | Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil_reporting/.env` prüfen, `docker compose up -d metabase` |

@@ -154,6 +154,10 @@ done
 PAAR=("$F_MPSWL" "$F_SWL")
 
 for f in "$F_MPSWL" "$F_SWL"; do
+  [ -r "$f" ] || fehler "$(basename "$f") ist nicht lesbar. Der Import läuft als uid $(id -u); die Datei gehört $(stat -c '%U:%G mit %a' "$f" 2>/dev/null || stat -f '%Su:%Sg mit %Lp' "$f"). Abhilfe: chmod 644 auf die Datei (das Verzeichnis bleibt geschlossen)."
+done
+
+for f in "$F_MPSWL" "$F_SWL"; do
   ENDE=$(lesen "$f" | tail -c 2000)
   [[ "$ENDE" == *"-- PostgreSQL database dump complete"* ]] \
     || fehler "$(basename "$f") ist unvollständig (Endmarke von pg_dump fehlt)."
