@@ -143,24 +143,31 @@ df -h /var/lib/docker                        # 10 GB frei reichen
 
 ### 4.2 Verzeichnisse, Lieferantenzugang, Repository
 
-```bash
-groupadd --system luemobil-dumps
-useradd --create-home --shell /usr/sbin/nologin -G luemobil-dumps dumpupload
+**Eingang:** Der Lieferant lädt in sein SFTP-Chroot hoch. Auf diesem Server ist das
+`/srv/sftp/tafreporting/upload` (Benutzer `tafreporting`, Gruppe `sftponly`). Dieses
+Verzeichnis wird **nicht verschoben** — der Import liest von dort und trägt die Dumps
+anschließend nach `/srv/luemobil/archiv` aus dem Chroot heraus.
 
-install -d -o root       -g root           -m 755  /srv/luemobil /srv/luemobil/dumps /etc/luemobil
-install -d -o dumpupload -g luemobil-dumps -m 2770 /srv/luemobil/dumps/eingang
+```bash
+install -d -o root -g root -m 755 /srv/luemobil /etc/luemobil
 # Die Container laufen als uid 70 (postgres im Alpine-Abbild):
 install -d -o 70 -g 70 -m 750 /srv/luemobil/archiv /srv/luemobil/fehler \
                               /var/lib/luemobil-import /var/backups/luemobil
-setfacl -m u:70:rwx /srv/luemobil/dumps/eingang     # Import darf Dumps wegräumen
 
-git clone https://github.com/lumimorixai/luemobil_reporting.git /opt/luemobil_reporting
+# Der Import muss im Eingang aufräumen dürfen — Schreibrecht auf das VERZEICHNIS.
+# Eigentum und Rechte des Lieferanten bleiben unverändert:
+apt install -y acl
+setfacl -m u:70:rwx /srv/sftp/tafreporting/upload
+getfacl -p /srv/sftp/tafreporting/upload | grep '^user:70'      # muss rwx zeigen
+
 install -o root -g root -m 644 /opt/luemobil_reporting/server/import.conf.beispiel /etc/luemobil/import.conf
 nano /etc/luemobil/import.conf                      # MELDUNG_AN und Mindestmengen prüfen
 ```
 
-SFTP-Zugang für den Lieferanten einrichten wie in **Anhang A.4** beschrieben
-(`server/sshd-dumps.conf`), einschließlich der Vereinbarung über Dateinamen und Format.
+Der SFTP-Zugang selbst ist eingerichtet (Chroot `/srv/sftp/tafreporting`, root:root 755).
+`server/sshd-dumps.conf` zeigt, wie der zugehörige `Match`-Block aussehen sollte:
+`internal-sftp` mit `-u 0007`, kein Shell-Zugang, keine Weiterleitungen, Anmeldung per
+Schlüssel. Die Vereinbarung über Dateinamen und Format steht in **Anhang A.4**.
 
 ### 4.3 Konfiguration des Stacks
 
