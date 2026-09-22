@@ -1,0 +1,8 @@
+# /etc/systemd/system/luemobil-meldung@.service
+# Wird von OnFailure= der anderen Dienste ausgelöst; %i = Name des fehlgeschlagenen Dienstes.
+[Unit]
+Description=LüMobil: Fehlermeldung für %i verschicken
+
+[Service]
+Type=oneshot
+ExecStart=/opt/luemobil/server/meldung.sh %i

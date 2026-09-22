@@ -1,0 +1,13 @@
+# /etc/systemd/system/luemobil-import.timer
+# Alle 30 Minuten nachsehen, ob ein neues Dump-Paar da ist. Ist nichts da,
+# endet der Lauf nach Sekundenbruchteilen. So ist egal, wann genau die Dumps kommen.
+[Unit]
+Description=LüMobil: alle 30 Minuten auf neue Dumps prüfen
+
+[Timer]
+OnCalendar=*:00/30
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

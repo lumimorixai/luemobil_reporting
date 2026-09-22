@@ -1,0 +1,30 @@
+# /etc/luemobil/import.conf — Konfiguration für /opt/luemobil/import/import.sh
+# Rechte: root:postgres 640
+
+# --- Verzeichnisse ---------------------------------------------------
+EINGANG=/srv/luemobil/dumps/eingang      # hier legt der Lieferant die Dumps ab (SFTP)
+ARCHIV=/srv/luemobil/archiv              # erfolgreich importierte Dumps
+FEHLER=/srv/luemobil/fehler              # abgewiesene Dumps, zur Analyse
+STATUS=/var/lib/luemobil-import          # Sperre, Import-Register, letzter Status
+
+# --- Datenbanken -----------------------------------------------------
+DB_MPSWL=kk_mpswl
+DB_SWL=kk_swl
+DB_REPORTING=lue_reporting
+# Leer = lokaler Unix-Socket, Anmeldung per peer als Systembenutzer postgres
+PGHOST_IMPORT=
+
+# --- Plausibilität ---------------------------------------------------
+MIN_KUNDEN=1000                  # weniger Konten in kk_mpswl.customers = Fehler
+MIN_BESTELLUNGEN=1000            # weniger Bestellungen = Fehler
+MAX_RUECKGANG_PROZENT=5          # Tabelle schrumpft gegenüber gestern um mehr = Fehler
+RAUCHTEST_SQL="SELECT count(*) FROM rpt.bestellposition"   # muss > 0 liefern
+
+# --- Zeiten ----------------------------------------------------------
+RUHEZEIT_MINUTEN=2               # Datei muss so lange unverändert sein (Upload fertig)
+WARTEN_AUF_PARTNER_MINUTEN=360   # so lange auf den zweiten Dump warten, dann Fehler
+ARCHIV_TAGE=7                    # Dumps enthalten Personendaten: danach löschen
+MAX_ALTER_STUNDEN=30             # Wächter schlägt Alarm, wenn der letzte Import älter ist
+
+# --- Benachrichtigung ------------------------------------------------
+MELDUNG_AN="betrieb@luemobil.de"  # Empfänger für Fehlermeldungen (meldung.sh)

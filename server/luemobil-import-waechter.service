@@ -1,0 +1,13 @@
+# /etc/systemd/system/luemobil-import-waechter.service
+# Schlägt fehl (und meldet), wenn der letzte erfolgreiche Import zu alt ist.
+# Fängt den Fall ab, dass gar keine Dumps ankommen — dann meldet der Import selbst nichts.
+[Unit]
+Description=LüMobil: Aktualität der Daten prüfen
+OnFailure=luemobil-meldung@%n.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=IMPORT_CONF=/etc/luemobil/import.conf
+ExecStart=/opt/luemobil/import/import.sh --pruefen

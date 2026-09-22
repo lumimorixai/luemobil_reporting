@@ -1,0 +1,33 @@
+# /etc/systemd/system/metabase.service
+# Metabase lauscht nur auf 127.0.0.1:3000. Öffentlich erreichbar ist über nginx
+# nur die Einbettung (/embed, /api/embed, /app). Admins: SSH-Tunnel.
+[Unit]
+Description=LüMobil: Metabase
+After=postgresql.service network-online.target
+Wants=network-online.target
+OnFailure=luemobil-meldung@%n.service
+
+[Service]
+User=metabase
+Group=metabase
+EnvironmentFile=/etc/luemobil/metabase.env
+WorkingDirectory=/var/lib/metabase
+ExecStart=/usr/bin/java -Xms512m -Xmx2g -Duser.timezone=Europe/Berlin \
+  --add-opens java.base/java.nio=ALL-UNNAMED \
+  -jar /opt/metabase/metabase.jar
+Restart=on-failure
+RestartSec=10
+# Metabase braucht beim Start 1–2 Minuten
+TimeoutStartSec=300
+SuccessExitStatus=143
+
+ProtectSystem=strict
+ReadWritePaths=/var/lib/metabase
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target

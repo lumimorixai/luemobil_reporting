@@ -1,0 +1,10 @@
+# /etc/systemd/system/luemobil-import-waechter.timer
+[Unit]
+Description=LüMobil: täglich um 9 Uhr die Aktualität der Daten prüfen
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

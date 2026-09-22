@@ -1,0 +1,35 @@
+# =====================================================================
+# Was NICHT ins Repository gehört
+# =====================================================================
+
+# --- Personenbezogene Daten ------------------------------------------
+# Produktiv-Dumps: echte Kundendaten, Passwort-Hashes. Nie einchecken.
+kk_*-PROD-*.sql
+kk_*-PROD-*.sql.gz
+*.dump
+
+# --- Geheimnisse ------------------------------------------------------
+ticket-api/geheim/
+*.env
+!*.env.beispiel
+*_secret
+*_passwort
+jwt_secret
+**/demo_token
+
+# --- Programme (lädt der Server selbst, siehe BETRIEBSHANDBUCH.md) ----
+metabase-setup/metabase.jar
+metabase-setup/plugins/
+ticket-api/bin/
+
+# --- Laufzeitdaten ----------------------------------------------------
+ticket-api/laufzeit/
+metabase-setup/metabase-app-db.mv.db
+metabase-setup/metabase-app-db.trace.db
+metabase-setup/metabase.log
+metabase-setup/einbettung_test.html
+*.pid
+*.log
+
+# --- Betriebssystem ---------------------------------------------------
+.DS_Store

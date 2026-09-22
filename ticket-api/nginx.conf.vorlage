@@ -1,0 +1,77 @@
+# =====================================================================
+# LüMobil Ticket-API — Reverse-Proxy
+# =====================================================================
+# Aufgaben: TLS beenden, nur den einen Endpunkt durchlassen,
+# Anfragen begrenzen, E-Mail-Adressen aus den Logs heraushalten.
+# @@BASIS@@ wird von einrichten.sh durch den Ordnerpfad ersetzt.
+# =====================================================================
+
+worker_processes 1;
+pid        @@BASIS@@/laufzeit/nginx.pid;
+error_log  @@BASIS@@/laufzeit/nginx-fehler.log warn;
+
+events { worker_connections 256; }
+
+http {
+  server_tokens off;
+  client_body_temp_path @@BASIS@@/laufzeit/tmp;
+  proxy_temp_path       @@BASIS@@/laufzeit/tmp;
+
+  # Protokoll ohne Body, ohne Query-String, ohne Authorization-Header.
+  # Die E-Mail steht im Body und landet deshalb nie in dieser Datei.
+  log_format api '$time_iso8601 $remote_addr "$request_method $uri" '
+                 '$status $body_bytes_sent ${request_time}s';
+  access_log @@BASIS@@/laufzeit/zugriff.log api;
+
+  # Rate-Limits: je Token und zusätzlich je IP-Adresse
+  limit_req_zone $http_authorization zone=je_token:10m rate=30r/m;
+  limit_req_zone $binary_remote_addr zone=je_ip:10m    rate=60r/m;
+  limit_req_status 429;
+
+  upstream postgrest { server 127.0.0.1:3100; keepalive 8; }
+
+  server {
+    listen 8443 ssl;
+    server_name tickets-api.local localhost;
+
+    ssl_certificate     @@BASIS@@/geheim/server.crt;
+    ssl_certificate_key @@BASIS@@/geheim/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:TLS:1m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options    "nosniff" always;
+    add_header Cache-Control             "no-store" always;
+
+    # Zugriff nur aus bekannten Netzen — für Produktion die IP des Hilfecenters
+    include @@BASIS@@/erlaubte_ips.conf;
+
+    client_max_body_size 1k;
+
+    # Der einzige Endpunkt. Nur POST, nur JSON.
+    location = /rpc/tickets_fuer_email {
+      limit_except POST { deny all; }
+      limit_req zone=je_token burst=10 nodelay;
+      limit_req zone=je_ip    burst=20 nodelay;
+
+      if ($http_authorization !~ "^Bearer .+") { return 401; }
+
+      proxy_pass http://postgrest;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header X-Real-IP  $remote_addr;
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_hide_header Content-Location;
+    }
+
+    # Alles andere gibt es nicht — auch nicht die OpenAPI-Beschreibung
+    location / { return 404; }
+  }
+
+  # Unverschlüsselt: keine Daten, nur Absage
+  server {
+    listen 8080;
+    return 403;
+  }
+}

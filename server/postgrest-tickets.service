@@ -1,0 +1,27 @@
+# /etc/systemd/system/postgrest-tickets.service
+# PostgREST für die Ticket-API. Lauscht nur auf 127.0.0.1:3100, nach außen geht es über nginx.
+[Unit]
+Description=LüMobil: Ticket-API (PostgREST)
+After=postgresql.service network-online.target
+Wants=network-online.target
+OnFailure=luemobil-meldung@%n.service
+
+[Service]
+User=postgrest
+Group=postgrest
+ExecStart=/usr/local/bin/postgrest /etc/luemobil/postgrest.conf
+# Konfiguration neu einlesen (z. B. nach Schemaänderung): systemctl reload postgrest-tickets
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=always
+RestartSec=5
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
