@@ -136,7 +136,7 @@ Dashboards über Caddy.
 ```bash
 docker compose version
 docker network ls | grep -i hilfecenter      # Name des gemeinsamen Netzes merken
-docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec postgres \
+docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) \
   psql -U luemobil -Atc "select version()"   # muss PostgreSQL 17 sein
 df -h /var/lib/docker                        # 10 GB frei reichen
 ```
@@ -212,7 +212,9 @@ Erwartet: `Rolle postgres angelegt`, beide Datenbanken eingespielt, dann
 
 ```bash
 cd /opt/luemobil_reporting
-PG="docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec -T postgres psql -U luemobil -v ON_ERROR_STOP=1"
+# Findet den PostgreSQL-Container des Hilfecenter-Stacks selbst:
+PG="docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) psql -U luemobil -v ON_ERROR_STOP=1"
+echo "$PG"     # zur Kontrolle: der Containername muss darin stehen
 
 $PG -d postgres -c "CREATE DATABASE lue_reporting"
 sed "s/PGUSER_PLACEHOLDER/luemobil/" metabase-setup/03_reporting_views.sql | $PG -q -d lue_reporting
@@ -430,8 +432,8 @@ den Container, der JWT-Schlüssel kommt aus der `.env`:
 cd /opt/luemobil_reporting && source .env
 export PGHOST=127.0.0.1 PGPORT=5433 PGUSER=luemobil PGPASSWORD="$POSTGRES_PASSWORD"
 # Zugang zum Container-PostgreSQL, solange kein Port veröffentlicht ist:
-docker compose -f /pfad/zum/hilfecenter/docker-compose.yml port postgres 5432 2>/dev/null \
-  || ssh -L 5433:127.0.0.1:5432 …   # oder: docker compose exec postgres psql …
+# oder direkt im Container arbeiten:
+#   docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) psql -U luemobil …
 
 printf '%s' "$JWT_SECRET" > /tmp/jwt && JWT_SECRET_DATEI=/tmp/jwt DB=lue_reporting \
   ticket-api/token.sh liste                     # Tokens, Zustand, Anzahl Abfragen
@@ -439,7 +441,7 @@ JWT_SECRET_DATEI=/tmp/jwt DB=lue_reporting ticket-api/token.sh sperren <jti>
 shred -u /tmp/jwt
 
 # Abfrageprotokoll ansehen
-docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec -T postgres \
+docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) \
   psql -U luemobil -d lue_reporting -c \
   "SELECT zeitpunkt, anwendung, bearbeiter, ip, treffer FROM protokoll.abfrage ORDER BY id DESC LIMIT 20"
 
@@ -506,12 +508,12 @@ Nur nötig, wenn ein Import „erfolgreich“ war, die Daten aber inhaltlich fal
 
 ```bash
 systemctl stop luemobil-import.timer
-docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec -T postgres psql -U luemobil <<'SQL'
+docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) psql -U luemobil <<'SQL'
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('kk_mpswl','kk_swl','kk_mpswl_alt','kk_swl_alt');
 ALTER DATABASE kk_mpswl RENAME TO kk_mpswl_defekt;  ALTER DATABASE kk_mpswl_alt RENAME TO kk_mpswl;
 ALTER DATABASE kk_swl   RENAME TO kk_swl_defekt;    ALTER DATABASE kk_swl_alt   RENAME TO kk_swl;
 SQL
-docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec -T postgres \
+docker exec -i $(docker ps --format '{{.Names}}' | grep -m1 postgres) \
   psql -U luemobil -d lue_reporting -Atc "SELECT count(*) FROM rpt.bestellposition"
 # Ursache klären, dann: DROP DATABASE kk_mpswl_defekt; DROP DATABASE kk_swl_defekt;
 systemctl start luemobil-import.timer
