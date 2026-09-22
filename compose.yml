@@ -59,10 +59,15 @@ services:
       MB_CHECK_FOR_UPDATES: "false"
       JAVA_TIMEZONE: ${TZ:-Europe/Berlin}
       TZ: ${TZ:-Europe/Berlin}
+      # Auf einem 4-GB-Server teilen sich Metabase, PostgreSQL und die App den
+      # Arbeitsspeicher. Ohne Begrenzung nimmt sich die JVM bis zu einem Viertel
+      # des Speichers und gibt ihn nicht zurück.
+      JAVA_OPTS: ${MB_JAVA_OPTS:--Xmx1g}
     # Nur lokal: Caddy reicht von außen ausschließlich /embed, /api/embed, /app durch.
     # Admins erreichen die Oberfläche über einen SSH-Tunnel auf diesen Port.
     ports:
       - '127.0.0.1:${MB_PORT:-3001}:3000'
+    mem_limit: ${MB_SPEICHER:-1500m}
     healthcheck:
       test: ['CMD', 'curl', '-sf', 'http://localhost:3000/api/health']
       interval: 30s
