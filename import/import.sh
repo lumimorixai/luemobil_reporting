@@ -281,7 +281,18 @@ AKTIV_TAUSCH=""   # ab hier gilt der Import
 # --- 7. Abschluss ----------------------------------------------------
 echo "$TAG_MPSWL $H_MPSWL $(basename "$F_MPSWL")" >> "$STATUS/importiert.txt"
 echo "$TAG_SWL $H_SWL $(basename "$F_SWL")"       >> "$STATUS/importiert.txt"
-mv "$F_MPSWL" "$F_SWL" "$ARCHIV/"; PAAR=()
+
+# Ab hier gilt der Import. Klappt das Archivieren nicht (z. B. fehlendes
+# Schreibrecht im Eingang), ist das eine Warnung — kein Grund, einen gültigen
+# Import als gescheitert darzustellen. Die Dumps bleiben dann liegen und werden
+# beim nächsten Lauf als "bereits importiert" erkannt.
+PAAR=()
+if mv "$F_MPSWL" "$F_SWL" "$ARCHIV/" 2>/dev/null; then
+  log "  Dumps archiviert"
+else
+  log "  WARNUNG: Dumps konnten nicht nach $ARCHIV verschoben werden."
+  log "  WARNUNG: Fehlt dem Import (uid $(id -u)) das Schreibrecht im Eingang? Sie bleiben liegen."
+fi
 
 cat > "$STATUS/letzter_import.json" <<EOF
 {"zeitpunkt": "$(date '+%Y-%m-%dT%H:%M:%S%z')", "dump_tag": "$TAG_MPSWL",
