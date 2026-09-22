@@ -109,4 +109,4 @@ networks:
   # Name prüfen mit:  docker network ls
   hilfecenter:
     external: true
-    name: ${HILFECENTER_NETZ:-luemobil-hilfecenter_default}
+    name: ${HILFECENTER_NETZ:-luemobil_default}

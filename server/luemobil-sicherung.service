@@ -9,5 +9,5 @@ OnFailure=luemobil-meldung@%n.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/luemobil
+WorkingDirectory=/opt/luemobil_reporting
 ExecStart=/usr/bin/docker compose run --rm sicherung

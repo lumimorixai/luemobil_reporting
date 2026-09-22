@@ -53,7 +53,7 @@ Anders als die Ticket-API muss Metabase öffentlich erreichbar sein, weil der Br
 iframe lädt. Freigegeben sind aber nur die Einbettungspfade; Anmeldeseite, Admin-Oberfläche
 und die übrige Metabase-API antworten von außen mit `404`.
 
-Wir tragen die Adresse eures Hilfecenters (z. B. `https://hilfe.luemobil.de`) als
+Wir tragen die Adresse eures Hilfecenters (z. B. `https://luemobil.swl-innovation.de`) als
 einzige erlaubte einbettende Seite ein. Von anderen Seiten aus lassen sich die Dashboards
 nicht anzeigen. Bitte nennt uns **alle** Adressen, also Dev, Test und Produktion.
 
@@ -86,7 +86,7 @@ METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
 ### 3.1 Konfiguration
 
 ```bash
-METABASE_URL=https://reporting.luemobil.de
+METABASE_URL=https://reporting.swl-innovation.de
 METABASE_EMBED_SECRET=…                   # aus dem Secret-Store, nie im Repository
 METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
 ```
@@ -224,8 +224,8 @@ Dieser Endpunkt muss dieselbe Anmelde- und Rechteprüfung haben wie die Seite se
 - **`referrerpolicy="no-referrer"`** am iframe setzen, damit das Token nicht über den
   Referer an Dritte geht.
 - **Content-Security-Policy** eurer Seite um die Metabase-Adresse ergänzen, falls ihr eine
-  habt: `frame-src https://reporting.luemobil.de;` und für das Resizer-Skript
-  `script-src … https://reporting.luemobil.de;`.
+  habt: `frame-src https://reporting.swl-innovation.de;` und für das Resizer-Skript
+  `script-src … https://reporting.swl-innovation.de;`.
 - **Schlüsselwechsel einplanen:** Tauschen wir den Schlüssel aus (z. B. nach einem Vorfall),
   werden alle Tokens sofort ungültig. Der neue Schlüssel muss sich ohne neues Deployment
   einspielen lassen.
@@ -281,7 +281,7 @@ Nur zur Information für das Hilfecenter-Team. Das erledigt der LüMobil-Betrieb
    Dashboards mit „ok“ und erzeugt eine Testseite.
 4. **nginx vor Metabase:** Metabase lauscht nur auf `127.0.0.1`. Nach außen werden nur
    `/embed/`, `/api/embed/` und `/app/` durchgereicht, alles andere gibt `404`. Zusätzlich
-   `add_header Content-Security-Policy "frame-ancestors https://hilfe.luemobil.de" always;`,
+   `add_header Content-Security-Policy "frame-ancestors https://luemobil.swl-innovation.de" always;`,
    denn Metabase selbst erlaubt ohne diese Einschränkung jede einbettende Seite.
    Welche Pfade die Einbettung genau braucht, beim Einrichten mit der Testseite und der
    Netzwerkansicht des Browsers bestätigen.

@@ -81,8 +81,8 @@ und die Ticket-API für das Hilfecenter.
 
 | Pfad | Eigentümer | Rechte | Inhalt |
 |---|---|---|---|
-| `/opt/luemobil/` | root:root | 755 | Dieses Repository (Skripte, `compose.yml`) |
-| `/opt/luemobil/.env` | root:root | 600 | **Alle Passwörter und Schlüssel** des Reporting-Stacks |
+| `/opt/luemobil_reporting/` | root:root | 755 | Dieses Repository (Skripte, `compose.yml`) |
+| `/opt/luemobil_reporting/.env` | root:root | 600 | **Alle Passwörter und Schlüssel** des Reporting-Stacks |
 | `/etc/luemobil/import.conf` | root:root | 644 | Import-Konfiguration (in den Container gemountet) |
 | `/srv/luemobil/dumps/` | root:root | 755 | SFTP-Chroot des Lieferanten (muss root gehören) |
 | `/srv/luemobil/dumps/eingang/` | dumpupload:luemobil-dumps | 2770 | Hier kommen die Dumps an |
@@ -154,8 +154,8 @@ install -d -o 70 -g 70 -m 750 /srv/luemobil/archiv /srv/luemobil/fehler \
                               /var/lib/luemobil-import /var/backups/luemobil
 setfacl -m u:70:rwx /srv/luemobil/dumps/eingang     # Import darf Dumps wegräumen
 
-git clone <repository> /opt/luemobil
-install -o root -g root -m 644 /opt/luemobil/server/import.conf.beispiel /etc/luemobil/import.conf
+git clone https://github.com/lumimorixai/luemobil_reporting.git /opt/luemobil_reporting
+install -o root -g root -m 644 /opt/luemobil_reporting/server/import.conf.beispiel /etc/luemobil/import.conf
 nano /etc/luemobil/import.conf                      # MELDUNG_AN und Mindestmengen prüfen
 ```
 
@@ -165,7 +165,7 @@ SFTP-Zugang für den Lieferanten einrichten wie in **Anhang A.4** beschrieben
 ### 4.3 Konfiguration des Stacks
 
 ```bash
-cd /opt/luemobil
+cd /opt/luemobil_reporting
 cp server/reporting.env.beispiel .env && chmod 600 .env
 
 openssl rand -hex 24     # -> API_DB_PASSWORT   (Rolle api_zugang)
@@ -185,7 +185,7 @@ melden sich damit am vorhandenen PostgreSQL an.
 # Dumps einmalig ablegen (oder den Lieferanten hochladen lassen)
 cp kk_mpswl-PROD-*.sql kk_swl-PROD-*.sql /srv/luemobil/dumps/eingang/
 
-cd /opt/luemobil && docker compose run --rm import
+cd /opt/luemobil_reporting && docker compose run --rm import
 ```
 
 Erwartet: `Rolle postgres angelegt`, beide Datenbanken eingespielt, dann
@@ -200,7 +200,7 @@ Erwartet: `Rolle postgres angelegt`, beide Datenbanken eingespielt, dann
 ### 4.5 Reporting-Sichten
 
 ```bash
-cd /opt/luemobil
+cd /opt/luemobil_reporting
 PG="docker compose -f /pfad/zum/hilfecenter/docker-compose.yml exec -T postgres psql -U luemobil -v ON_ERROR_STOP=1"
 
 $PG -d postgres -c "CREATE DATABASE lue_reporting"
@@ -222,7 +222,7 @@ in `03_reporting_views.sql` nur der Platzhalter für den Benutzer zu ersetzen.
 ### 4.6 Ticket-API und Metabase-Rollen in der Datenbank
 
 ```bash
-cd /opt/luemobil
+cd /opt/luemobil_reporting
 source .env
 $PG -q -d lue_reporting -v db_passwort="$API_DB_PASSWORT" < ticket-api/01_datenbank.sql
 $PG -q -d lue_reporting -v pw_app="$MB_DB_PASSWORT" -v pw_leser="<neu: openssl rand -hex 24>" \
@@ -235,7 +235,7 @@ Das Passwort von `metabase_leser` wird in 4.8 gebraucht, also notieren.
 ### 4.7 Stack starten
 
 ```bash
-cd /opt/luemobil && docker compose up -d
+cd /opt/luemobil_reporting && docker compose up -d
 docker compose ps
 docker compose logs -f metabase       # 1–2 Minuten bis "Metabase Initialization COMPLETE"
 ```
@@ -254,7 +254,7 @@ cd ~/Documents/luemobil_reporting/metabase-setup && ./stop.sh
 scp metabase-app-db.mv.db admin@server:/tmp/ && ./start.sh
 
 # 2. Auf dem Server: Metabase anhalten und die Datei in die leere metabase_app laden
-cd /opt/luemobil && docker compose stop metabase
+cd /opt/luemobil_reporting && docker compose stop metabase
 docker run --rm --network "$HILFECENTER_NETZ" -v /tmp:/h metabase/metabase:v0.63.18 \
   sh -c 'java --add-opens java.base/java.nio=ALL-UNNAMED -jar /app/metabase.jar load-from-h2 /h/metabase-app-db'
   # MB_DB_*-Variablen dabei aus der .env übergeben (-e MB_DB_TYPE=postgres -e MB_DB_HOST=… )
@@ -270,7 +270,7 @@ ssh -L 3001:127.0.0.1:3001 admin@server          # auf dem Arbeitsplatz, offen l
 MB_URL=http://localhost:3001 LESER_PASSWORT=<pw_leser aus 4.6> \
 ADMIN_EMAIL=vorname.nachname@luemobil.de ADMIN_VORNAME=Vorname ADMIN_NACHNAME=Nachname \
 ADMIN_PASSWORT='<mind. 12 Zeichen>' DB_HOST=postgres \
-  /opt/luemobil/server/metabase_nach_umzug.py
+  /opt/luemobil_reporting/server/metabase_nach_umzug.py
 ```
 
 Das Skript stellt die Verbindung auf `metabase_leser` um, entfernt die Beispieldatenbank,
@@ -281,8 +281,11 @@ aus der Bauphase (IDs 2–5) archivieren und weitere Konten anlegen.
 
 ### 4.9 Caddy: Dashboards nach außen
 
+**Vorher:** `reporting.swl-innovation.de` muss im DNS auf den Server zeigen, sonst bekommt
+Caddy kein Zertifikat. Prüfen mit `dig +short reporting.swl-innovation.de`.
+
 ```bash
-cat /opt/luemobil/server/Caddyfile-reporting.example >> /etc/caddy/Caddyfile
+cat /opt/luemobil_reporting/server/Caddyfile-reporting.example >> /etc/caddy/Caddyfile
 nano /etc/caddy/Caddyfile        # Hostnamen und erlaubte einbettende Adressen eintragen
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 ```
@@ -306,9 +309,9 @@ Dazu die beiden Geheimnisse als Dateien in dessen `secrets/`:
 
 ```bash
 cd /pfad/zum/hilfecenter
-/opt/luemobil/ticket-api/token.sh neu hilfecenter-prod 365   # siehe 5.3 (Variante Docker)
+/opt/luemobil_reporting/ticket-api/token.sh neu hilfecenter-prod 365   # siehe 5.3 (Variante Docker)
 printf '%s' '<token>'          > secrets/luemobil_api_token
-printf '%s' '<MB_EMBEDDING_SECRET_KEY aus /opt/luemobil/.env>' > secrets/metabase_embed_secret
+printf '%s' '<MB_EMBEDDING_SECRET_KEY aus /opt/luemobil_reporting/.env>' > secrets/metabase_embed_secret
 chmod 400 secrets/luemobil_api_token secrets/metabase_embed_secret
 docker compose up -d app
 ```
@@ -319,7 +322,7 @@ das stellt `HILFECENTER_NETZ` in der `.env` des Reporting-Stacks sicher.
 ### 4.11 Zeitpläne aktivieren
 
 ```bash
-cp /opt/luemobil/server/luemobil-*.service /opt/luemobil/server/luemobil-*.timer /etc/systemd/system/
+cp /opt/luemobil_reporting/server/luemobil-*.service /opt/luemobil_reporting/server/luemobil-*.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now luemobil-import.timer luemobil-import-waechter.timer luemobil-sicherung.timer
 systemctl list-timers 'luemobil-*'
@@ -334,7 +337,7 @@ systemctl list-timers 'luemobil-*'
 ### 4.12 Abnahme
 
 ```bash
-cd /opt/luemobil
+cd /opt/luemobil_reporting
 
 # Import: 32 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
 docker compose run --rm --entrypoint /opt/luemobil/test_import.sh import \
@@ -382,7 +385,7 @@ abgeschaltet ist (4.8.4), zeigen die Dashboards sofort den neuen Stand.
 ### 5.2 Nachsehen
 
 ```bash
-cd /opt/luemobil
+cd /opt/luemobil_reporting
 docker compose run --rm import --status      # letzter erfolgreicher Import (JSON)
 journalctl -u luemobil-import --since today  # Protokoll der Importläufe
 systemctl list-timers 'luemobil-*'           # nächste Läufe
@@ -413,7 +416,7 @@ Tokens werden mit `token.sh` verwaltet. Im Docker-Betrieb zeigt es über `DB`-Va
 den Container, der JWT-Schlüssel kommt aus der `.env`:
 
 ```bash
-cd /opt/luemobil && source .env
+cd /opt/luemobil_reporting && source .env
 export PGHOST=127.0.0.1 PGPORT=5433 PGUSER=luemobil PGPASSWORD="$POSTGRES_PASSWORD"
 # Zugang zum Container-PostgreSQL, solange kein Port veröffentlicht ist:
 docker compose -f /pfad/zum/hilfecenter/docker-compose.yml port postgres 5432 2>/dev/null \
@@ -436,7 +439,7 @@ docker compose logs -f postgrest                # Fehler der API (ohne Daten)
 
 ```bash
 ssh -L 3001:127.0.0.1:3001 admin@server      # Oberfläche: http://localhost:3001
-cd /opt/luemobil && docker compose ps metabase
+cd /opt/luemobil_reporting && docker compose ps metabase
 docker compose logs -f metabase
 tail -f /var/log/caddy/reporting.log          # eingebettete Zugriffe, Token gekürzt
 ```
@@ -467,7 +470,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 | Import: `role "postgres" does not exist` | `DUMP_ROLLEN` in der `import.conf` leer | Eintrag `DUMP_ROLLEN="postgres"` ergänzen (siehe 4.4) |
 | Import: `permission denied` beim Verschieben der Dumps | Verzeichnisse gehören nicht uid 70 | `chown -R 70:70 /srv/luemobil/archiv /srv/luemobil/fehler /var/lib/luemobil-import`, ACL für den Eingang (4.2) |
 | App meldet, die Ticket-API sei nicht erreichbar | Beide Stacks nicht im selben Netz | `docker inspect <app-container> -f '{{json .NetworkSettings.Networks}}'` mit dem postgrest-Container vergleichen |
-| Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil/.env` prüfen, `docker compose up -d metabase` |
+| Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil_reporting/.env` prüfen, `docker compose up -d metabase` |
 | Metabase-Dashboards leer, Kacheln melden Fehler | Verbindung zu `lue_reporting` gestört oder Rechte nach Sichten-Neuanlage verloren | Im Tunnel *Admin → Datenbanken → LüMobil Reporting → Verbindung testen*; 4.8.1 erneut ausführen |
 | Dashboards zeigen alte Zahlen | Zwischenspeicher wieder eingeschaltet | Im Tunnel *Admin → Performance → Standardregel* auf „Kein Zwischenspeicher"; siehe 4.8 |
 | Eingebettetes Dashboard im Hilfecenter leer | Token, Freigabe, IP oder CSP — siehe Fehlerbilder in `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Dort Abschnitt 6 |
@@ -478,7 +481,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 
 ```bash
 mv /srv/luemobil/fehler/kk_*-PROD-JJJJMMTT*.sql /srv/luemobil/dumps/eingang/
-cd /opt/luemobil && docker compose run --rm import      # oder: systemctl start luemobil-import
+cd /opt/luemobil_reporting && docker compose run --rm import      # oder: systemctl start luemobil-import
 ```
 
 Ein schon erfolgreich importiertes Paar erkennt das Skript und überspringt es. Um es trotzdem neu
@@ -503,14 +506,14 @@ systemctl start luemobil-import.timer
 
 ### 6.3 Token kompromittiert
 
-Token sperren wie in 5.3. Ist der **JWT-Schlüssel** selbst betroffen (`/opt/luemobil/.env`
+Token sperren wie in 5.3. Ist der **JWT-Schlüssel** selbst betroffen (`/opt/luemobil_reporting/.env`
 gelangte nach außen): neuen Schlüssel erzeugen, `JWT_SECRET` in der `.env` ersetzen,
 `docker compose up -d postgrest`. Damit sind **alle** Tokens ungültig, neue ausstellen und
 `secrets/luemobil_api_token` im Hilfecenter austauschen.
 
 ### 6.4 Metabase-Einbettung: Schlüssel wechseln
 
-Neuen Schlüssel erzeugen (`openssl rand -hex 32`), in `/opt/luemobil/.env` unter
+Neuen Schlüssel erzeugen (`openssl rand -hex 32`), in `/opt/luemobil_reporting/.env` unter
 `MB_EMBEDDING_SECRET_KEY` eintragen, `docker compose up -d metabase`. Alle bisherigen Tokens
 sind sofort ungültig; das Hilfecenter braucht den neuen Schlüssel in
 `secrets/metabase_embed_secret`, sonst bleiben die Dashboards leer.
@@ -518,7 +521,7 @@ sind sofort ungültig; das Hilfecenter braucht den neuen Schlüssel in
 ### 6.5 `lue_reporting` wiederherstellen
 
 ```bash
-cd /opt/luemobil && docker compose stop postgrest
+cd /opt/luemobil_reporting && docker compose stop postgrest
 docker compose run --rm --entrypoint sh sicherung -c '
   dropdb lue_reporting && createdb lue_reporting &&
   pg_restore -d lue_reporting /sicherung/lue_reporting-JJJJMMTT.dump'
@@ -528,7 +531,7 @@ docker compose up -d postgrest
 ### 6.6 Metabase wiederherstellen
 
 ```bash
-cd /opt/luemobil && docker compose stop metabase
+cd /opt/luemobil_reporting && docker compose stop metabase
 docker compose run --rm --entrypoint sh sicherung -c '
   dropdb metabase_app && createdb -O metabase_app metabase_app &&
   pg_restore -d metabase_app /sicherung/metabase_app-JJJJMMTT.dump'
@@ -586,7 +589,7 @@ Auftragsverarbeitung mit dem Hoster des virtuellen Servers.
 |---|---|
 | `compose.yml` | Der Reporting-Stack: postgrest, metabase, import, sicherung |
 | `import/Dockerfile`, `sichern.sh` | Werkzeug-Abbild (psql, pg_dump) und die Sicherung |
-| `server/reporting.env.beispiel` | Vorlage für `/opt/luemobil/.env` |
+| `server/reporting.env.beispiel` | Vorlage für `/opt/luemobil_reporting/.env` |
 | `server/Caddyfile-reporting.example` | Caddy: nur Einbettungspfade, CSP, Token im Log gekürzt |
 | `server/ohne-docker/` | nginx- und systemd-Dateien für den Betrieb ohne Docker (Anhang A) |
 | `import/import.sh` | Der Import (Abschnitt 5.1) |
@@ -664,13 +667,13 @@ install -d -o metabase -g metabase       -m 750  /var/lib/metabase /var/lib/meta
 ### A.3 Skripte installieren
 
 ```bash
-git clone <repository> /opt/luemobil        # oder Ordner kopieren
-chmod 755 /opt/luemobil/import/*.sh /opt/luemobil/ticket-api/*.sh /opt/luemobil/server/meldung.sh
+git clone <repository> /opt/luemobil_reporting        # oder Ordner kopieren
+chmod 755 /opt/luemobil_reporting/import/*.sh /opt/luemobil_reporting/ticket-api/*.sh /opt/luemobil_reporting/server/meldung.sh
 
-install -o root -g postgres -m 640 /opt/luemobil/server/import.conf.beispiel /etc/luemobil/import.conf
+install -o root -g postgres -m 640 /opt/luemobil_reporting/server/import.conf.beispiel /etc/luemobil/import.conf
 nano /etc/luemobil/import.conf              # MELDUNG_AN, Mindestmengen prüfen
 
-cp /opt/luemobil/server/*.service /opt/luemobil/server/*.timer /etc/systemd/system/
+cp /opt/luemobil_reporting/server/*.service /opt/luemobil_reporting/server/*.timer /etc/systemd/system/
 systemctl daemon-reload
 ```
 
@@ -681,7 +684,7 @@ install -d -o dumpupload -g dumpupload -m 700 /home/dumpupload/.ssh
 nano /home/dumpupload/.ssh/authorized_keys  # öffentlichen Schlüssel des Lieferanten eintragen
 chmod 600 /home/dumpupload/.ssh/authorized_keys; chown dumpupload: /home/dumpupload/.ssh/authorized_keys
 
-cp /opt/luemobil/server/sshd-dumps.conf /etc/ssh/sshd_config.d/luemobil-dumps.conf
+cp /opt/luemobil_reporting/server/sshd-dumps.conf /etc/ssh/sshd_config.d/luemobil-dumps.conf
 sshd -t && systemctl reload ssh
 ```
 
@@ -717,7 +720,7 @@ Die Skripte aus `metabase-setup/` legen die Sichten an. Auf dem Server verbindet
 
 ```bash
 sudo -u postgres createdb lue_reporting
-cd /opt/luemobil/metabase-setup
+cd /opt/luemobil_reporting/metabase-setup
 sed -e "s/host 'localhost', port '5432', //" -e "s/PGUSER_PLACEHOLDER/postgres/" 03_reporting_views.sql \
   | sudo -u postgres psql -v ON_ERROR_STOP=1 -d lue_reporting
 for f in 04_kennzahlen.sql 06_payone_und_kennzahlen.sql 08_korrekturen.sql; do
@@ -744,7 +747,7 @@ openssl rand -base64 48 | tr -d '\n' > /etc/luemobil/jwt_secret
 chown root:postgres /etc/luemobil/jwt_secret; chmod 640 /etc/luemobil/jwt_secret
 DBPW=$(openssl rand -hex 24)
 
-sudo -u postgres psql -d lue_reporting -v db_passwort="$DBPW" -f /opt/luemobil/ticket-api/01_datenbank.sql
+sudo -u postgres psql -d lue_reporting -v db_passwort="$DBPW" -f /opt/luemobil_reporting/ticket-api/01_datenbank.sql
 ```
 
 **Nicht** `ticket-api/02_nur_demo.sql` ausführen.
@@ -781,7 +784,7 @@ Kein `db-anon-role`, das ist Absicht: Ohne gültiges Token gibt es keine Antwort
 #### A.7.3 nginx und Zertifikat
 
 ```bash
-cp /opt/luemobil/server/nginx-tickets-api.conf /etc/nginx/sites-available/tickets-api
+cp /opt/luemobil_reporting/server/nginx-tickets-api.conf /etc/nginx/sites-available/tickets-api
 sed -i 's/TICKETS-API.EXAMPLE.DE/tickets-api.luemobil.de/g' /etc/nginx/sites-available/tickets-api
 
 cat > /etc/luemobil/erlaubte_ips.conf <<'EOF'
@@ -803,7 +806,7 @@ neu geladen werden: `echo 'deploy-hook = systemctl reload nginx' >> /etc/letsenc
 #### A.7.4 Tokens ausstellen
 
 ```bash
-cd /opt/luemobil/ticket-api
+cd /opt/luemobil_reporting/ticket-api
 sudo -u postgres JWT_SECRET_DATEI=/etc/luemobil/jwt_secret ./token.sh neu hilfecenter-prod 365
 ```
 
@@ -822,7 +825,7 @@ erreichbar; Dashboards bauen Administratoren über einen SSH-Tunnel.
 PW_APP=$(openssl rand -hex 24); PW_LESER=$(openssl rand -hex 24)
 sudo -u postgres psql -d lue_reporting \
   -v pw_app="$PW_APP" -v pw_leser="$PW_LESER" -v eigentuemer=postgres \
-  -f /opt/luemobil/server/metabase_datenbank.sql
+  -f /opt/luemobil_reporting/server/metabase_datenbank.sql
 ```
 
 Das legt an: Datenbank `metabase_app` samt Besitzer und die Rolle `metabase_leser`
@@ -836,11 +839,11 @@ Die Version muss **dieselbe** sein wie lokal, sonst schlägt der Umzug fehl (hie
 ```bash
 curl -sSL -o /opt/metabase/metabase.jar https://downloads.metabase.com/v0.63.18/metabase.jar
 
-install -o root -g metabase -m 640 /opt/luemobil/server/metabase.env.beispiel /etc/luemobil/metabase.env
+install -o root -g metabase -m 640 /opt/luemobil_reporting/server/metabase.env.beispiel /etc/luemobil/metabase.env
 openssl rand -base64 32   # -> MB_ENCRYPTION_SECRET_KEY
 openssl rand -hex 32      # -> MB_EMBEDDING_SECRET_KEY (geht an das Hilfecenter)
 nano /etc/luemobil/metabase.env   # Schlüssel, MB_DB_PASS=$PW_APP, MB_SITE_URL eintragen
-cp /opt/luemobil/server/metabase.service /etc/systemd/system/; systemctl daemon-reload
+cp /opt/luemobil_reporting/server/metabase.service /etc/systemd/system/; systemctl daemon-reload
 ```
 
 `MB_ENCRYPTION_SECRET_KEY` verschlüsselt die gespeicherten Datenbankzugänge. Geht er
@@ -879,7 +882,7 @@ ssh -L 3030:127.0.0.1:3000 admin@server        # auf dem Arbeitsplatz, offen las
 MB_URL=http://localhost:3030 LESER_PASSWORT=$PW_LESER \
 ADMIN_EMAIL=vorname.nachname@luemobil.de ADMIN_VORNAME=Vorname ADMIN_NACHNAME=Nachname \
 ADMIN_PASSWORT='<mind. 12 Zeichen>' \
-  /opt/luemobil/server/metabase_nach_umzug.py
+  /opt/luemobil_reporting/server/metabase_nach_umzug.py
 ```
 
 Das Skript stellt die Verbindung auf `metabase_leser` um, entfernt die Beispieldatenbank,
@@ -898,10 +901,10 @@ Danach von Hand im Tunnel (`http://localhost:3030`):
 #### A.8.5 nginx für die Einbettung
 
 ```bash
-cp /opt/luemobil/server/nginx-reporting.conf /etc/nginx/sites-available/reporting
-sed -i 's/REPORTING.EXAMPLE.DE/reporting.luemobil.de/g;
-        s#HILFECENTER-ADRESSEN#https://hilfe.luemobil.de#' /etc/nginx/sites-available/reporting
-certbot certonly --webroot -w /var/www/certbot -d reporting.luemobil.de
+cp /opt/luemobil_reporting/server/nginx-reporting.conf /etc/nginx/sites-available/reporting
+sed -i 's/REPORTING.EXAMPLE.DE/reporting.swl-innovation.de/g;
+        s#HILFECENTER-ADRESSEN#https://luemobil.swl-innovation.de#' /etc/nginx/sites-available/reporting
+certbot certonly --webroot -w /var/www/certbot -d reporting.swl-innovation.de
 ln -s /etc/nginx/sites-available/reporting /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 ```
@@ -936,7 +939,7 @@ Jeder fehlgeschlagene Dienst verschickt eine Mail an `MELDUNG_AN` mit den letzte
 **Import** — Test mit Testdatenbanken, fasst die echten nicht an (ca. 1 Minute):
 
 ```bash
-cd /opt/luemobil/import
+cd /opt/luemobil_reporting/import
 sudo -u postgres ./test_import.sh \
   "$(ls -t /srv/luemobil/archiv/kk_mpswl-PROD-*.sql | head -1)" \
   "$(ls -t /srv/luemobil/archiv/kk_swl-PROD-*.sql | head -1)"
@@ -961,11 +964,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://tickets-api.luemobil.de
 
 ```bash
 METABASE_URL=http://localhost:3030 METABASE_EMBED_SECRET=<schlüssel> \
-  /opt/luemobil/metabase-setup/einbettung_pruefen.py       # 4x "ok"
+  /opt/luemobil_reporting/metabase-setup/einbettung_pruefen.py       # 4x "ok"
 ```
 
-Danach dieselbe Prüfung von außen mit `METABASE_URL=https://reporting.luemobil.de`, und
-stichprobenartig im Browser: `https://reporting.luemobil.de/` muss `404` liefern.
+Danach dieselbe Prüfung von außen mit `METABASE_URL=https://reporting.swl-innovation.de`, und
+stichprobenartig im Browser: `https://reporting.swl-innovation.de/` muss `404` liefern.
 
 **Benachrichtigung** — einmal auslösen:
 `systemctl start luemobil-meldung@test.service` → Mail muss ankommen.

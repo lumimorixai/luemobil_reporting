@@ -32,8 +32,8 @@ Der Reporting-Teil läuft als eigener Docker-Stack neben dem Hilfecenter und nut
 PostgreSQL-Container mit:
 
 ```bash
-git clone <dieses-repository> /opt/luemobil
-cd /opt/luemobil && cp server/reporting.env.beispiel .env   # Passwörter eintragen
+git clone https://github.com/lumimorixai/luemobil_reporting.git /opt/luemobil_reporting
+cd /opt/luemobil_reporting && cp server/reporting.env.beispiel .env   # Passwörter eintragen
 docker compose up -d                 # Ticket-API (nur im Docker-Netz) und Metabase
 docker compose run --rm import       # Dumps einspielen (danach per systemd-Timer)
 ```
