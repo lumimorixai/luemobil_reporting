@@ -284,8 +284,11 @@ docker run --rm --user root --network "$HILFECENTER_NETZ" -v /tmp:/h \
   --entrypoint java metabase/metabase:v0.63.18 \
   --add-opens java.base/java.nio=ALL-UNNAMED -jar /app/metabase.jar load-from-h2 /h/metabase-app-db
 
-shred -u /tmp/metabase-app-db.mv.db /tmp/metabase-app-db.trace.db 2>/dev/null
+# ERST prüfen, DANN aufräumen — bei einem Fehlschlag bleibt die Datei liegen
+# und muss nicht erneut übertragen werden:
+$PG -At -d metabase_app -c "SELECT count(*) FROM report_dashboard"     # 9 erwartet
 docker compose up -d metabase
+shred -u /tmp/metabase-app-db.mv.db /tmp/metabase-app-db.trace.db 2>/dev/null
 ```
 
 Danach die Nacharbeiten über den SSH-Tunnel:
