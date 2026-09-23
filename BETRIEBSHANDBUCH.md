@@ -266,12 +266,25 @@ mit. **Lokal geprobt:** 5 Dashboards und 80 Fragen übertragen, IDs 6–9 erhalt
 cd ~/Documents/luemobil_reporting/metabase-setup && ./stop.sh
 scp metabase-app-db.mv.db admin@server:/tmp/ && ./start.sh
 
-# 2. Auf dem Server: Metabase anhalten und die Datei in die leere metabase_app laden
-cd /opt/luemobil_reporting && docker compose stop metabase
-docker run --rm --network "$HILFECENTER_NETZ" -v /tmp:/h metabase/metabase:v0.63.18 \
-  sh -c 'java --add-opens java.base/java.nio=ALL-UNNAMED -jar /app/metabase.jar load-from-h2 /h/metabase-app-db'
-  # MB_DB_*-Variablen dabei aus der .env übergeben (-e MB_DB_TYPE=postgres -e MB_DB_HOST=… )
-shred -u /tmp/metabase-app-db.mv.db
+# 2. Auf dem Server: Metabase anhalten, Zieldatenbank leeren, Datei laden
+cd /opt/luemobil_reporting && source .env
+docker compose stop metabase
+
+# load-from-h2 besteht auf einer LEEREN Zieldatenbank. Hat Metabase dort schon
+# sein Schema angelegt (nach dem ersten Start), wird sie neu erstellt:
+$PG -d postgres -c "DROP DATABASE IF EXISTS metabase_app WITH (FORCE)"
+$PG -d postgres -c "CREATE DATABASE metabase_app OWNER metabase_app ENCODING 'UTF8' TEMPLATE template0"
+
+# --user root ist nötig: Metabase lässt vor dem Kopieren Liquibase über die
+# H2-Datei laufen und SCHREIBT dabei hinein ("The database is read only", sonst).
+docker run --rm --user root --network "$HILFECENTER_NETZ" -v /tmp:/h \
+  -e MB_DB_TYPE=postgres -e MB_DB_HOST="$PG_HOST" -e MB_DB_PORT=5432 \
+  -e MB_DB_DBNAME=metabase_app -e MB_DB_USER=metabase_app -e MB_DB_PASS="$MB_DB_PASSWORT" \
+  -e MB_ENCRYPTION_SECRET_KEY="$MB_ENCRYPTION_SECRET_KEY" \
+  --entrypoint java metabase/metabase:v0.63.18 \
+  --add-opens java.base/java.nio=ALL-UNNAMED -jar /app/metabase.jar load-from-h2 /h/metabase-app-db
+
+shred -u /tmp/metabase-app-db.mv.db /tmp/metabase-app-db.trace.db 2>/dev/null
 docker compose up -d metabase
 ```
 
@@ -485,6 +498,8 @@ Hilfecenter braucht die neue Dashboard-ID.
 | Import: `permission denied` beim Verschieben der Dumps, `getfacl` zeigt `#effective:r-x` | Ein `chmod` nach dem `setfacl` hat die ACL-Maske zurückgesetzt | `setfacl -m u:70:rwx,m::rwx <eingang>` (4.2) |
 | Import: `permission denied` beim Verschieben der Dumps | Verzeichnisse gehören nicht uid 70 | `chown -R 70:70 /srv/luemobil/archiv /srv/luemobil/fehler /var/lib/luemobil-import`, ACL für den Eingang (4.2) |
 | App meldet, die Ticket-API sei nicht erreichbar | Beide Stacks nicht im selben Netz | `docker inspect <app-container> -f '{{json .NetworkSettings.Networks}}'` mit dem postgrest-Container vergleichen |
+| `load-from-h2`: „The database is read only" | Der Container darf nicht in die H2-Datei schreiben, Liquibase braucht das aber | `docker run` mit `--user root` (4.8) |
+| `load-from-h2`: Zieldatenbank ist nicht leer | Metabase lief zwischendurch und hat sein Schema angelegt | `metabase_app` löschen und neu anlegen (4.8) |
 | Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil_reporting/.env` prüfen, `docker compose up -d metabase` |
 | Metabase-Dashboards leer, Kacheln melden Fehler | Verbindung zu `lue_reporting` gestört oder Rechte nach Sichten-Neuanlage verloren | Im Tunnel *Admin → Datenbanken → LüMobil Reporting → Verbindung testen*; 4.8.1 erneut ausführen |
 | Dashboards zeigen alte Zahlen | Zwischenspeicher wieder eingeschaltet | Im Tunnel *Admin → Performance → Standardregel* auf „Kein Zwischenspeicher"; siehe 4.8 |
