@@ -94,6 +94,26 @@ services:
       - ${STATUS_VERZEICHNIS:-/var/lib/luemobil-import}:/var/lib/luemobil-import
     networks: [hilfecenter]
 
+  # --- Nacharbeiten nach dem Umzug (einmalig) ---------------------------
+  # Spricht Metabase im Docker-Netz an — kein SSH-Tunnel nötig:
+  #   docker compose run --rm nacharbeiten
+  nacharbeiten:
+    image: python:3.13-alpine
+    profiles: ['werkzeuge']
+    entrypoint: ['python', '/opt/luemobil/metabase_nach_umzug.py']
+    environment:
+      MB_URL: http://metabase:3000
+      DB_HOST: ${PG_HOST:-postgres}
+      LESER_PASSWORT: ${MB_LESER_PASSWORT:?MB_LESER_PASSWORT fehlt in .env}
+      ADMIN_EMAIL: ${MB_ADMIN_EMAIL:?MB_ADMIN_EMAIL fehlt in .env}
+      ADMIN_VORNAME: ${MB_ADMIN_VORNAME:?MB_ADMIN_VORNAME fehlt in .env}
+      ADMIN_NACHNAME: ${MB_ADMIN_NACHNAME:?MB_ADMIN_NACHNAME fehlt in .env}
+      ADMIN_PASSWORT: ${MB_ADMIN_PASSWORT:?MB_ADMIN_PASSWORT fehlt in .env}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - ./server/metabase_nach_umzug.py:/opt/luemobil/metabase_nach_umzug.py:ro
+    networks: [hilfecenter]
+
   # --- Sicherung von lue_reporting und metabase_app ---------------------
   sicherung:
     build: ./import

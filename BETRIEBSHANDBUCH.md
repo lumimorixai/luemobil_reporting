@@ -291,14 +291,21 @@ docker compose up -d metabase
 shred -u /tmp/metabase-app-db.mv.db /tmp/metabase-app-db.trace.db 2>/dev/null
 ```
 
-Danach die Nacharbeiten über den SSH-Tunnel:
+Danach die Nacharbeiten. Sie laufen als eigener Dienst im Docker-Netz, ein SSH-Tunnel ist
+dafür nicht nötig. Vorher in der `.env` ergänzen: `MB_LESER_PASSWORT` (aus 4.6) und die vier
+`MB_ADMIN_*`-Zeilen für das persönliche Admin-Konto.
 
 ```bash
-ssh -L 3001:127.0.0.1:3001 admin@server          # auf dem Arbeitsplatz, offen lassen
+cd /opt/luemobil_reporting
+docker compose run --rm nacharbeiten
+```
 
-MB_URL=http://localhost:3001 LESER_PASSWORT=<pw_leser aus 4.6> \
-ADMIN_EMAIL=vorname.nachname@luemobil.de ADMIN_VORNAME=Vorname ADMIN_NACHNAME=Nachname \
-ADMIN_PASSWORT='<mind. 12 Zeichen>' DB_HOST=postgres \
+Alternativ vom Arbeitsplatz aus über einen Tunnel, etwa um es zu beobachten:
+
+```bash
+ssh -L 3001:127.0.0.1:3001 root@<server>     # offen lassen
+MB_URL=http://localhost:3001 LESER_PASSWORT=… ADMIN_EMAIL=… ADMIN_VORNAME=… \
+ADMIN_NACHNAME=… ADMIN_PASSWORT=… DB_HOST=postgres \
   /opt/luemobil_reporting/server/metabase_nach_umzug.py
 ```
 
