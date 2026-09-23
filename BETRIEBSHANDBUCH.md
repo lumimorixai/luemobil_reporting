@@ -321,10 +321,22 @@ aus der Bauphase (IDs 2–5) archivieren und weitere Konten anlegen.
 Caddy kein Zertifikat. Prüfen mit `dig +short reporting.swl-innovation.de`.
 
 ```bash
-cat /opt/luemobil_reporting/server/Caddyfile-reporting.example >> /etc/caddy/Caddyfile
-nano /etc/caddy/Caddyfile        # Hostnamen und erlaubte einbettende Adressen eintragen
+# Logverzeichnis muss existieren und Caddy gehören, sonst schlägt das Neuladen fehl
+mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy && chmod 750 /var/log/caddy
+
+# Sauberer als Anhängen ans Caddyfile: eigene Datei, einmalig eingebunden mit
+#   import /etc/caddy/conf.d/*.caddy     (ganz oben im Caddyfile)
+mkdir -p /etc/caddy/conf.d
+cp /opt/luemobil_reporting/server/Caddyfile-reporting.example /etc/caddy/conf.d/reporting.caddy
+sed -i 's/REPORTING.EXAMPLE.DE/reporting.swl-innovation.de/g;
+        s#HILFECENTER-ADRESSEN#https://luemobil.swl-innovation.de#' /etc/caddy/conf.d/reporting.caddy
+
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 ```
+
+> „ambiguous site definition" heißt, dass derselbe Hostname zweimal im Caddyfile steht — etwa
+> weil der Block versehentlich zweimal angehängt wurde. `grep -n "reporting" /etc/caddy/Caddyfile`
+> zeigt die Stellen; einer der beiden Blöcke muss weg.
 
 Durchgelassen werden nur `/embed/`, `/api/embed/` und `/app/`, alles andere gibt `404`.
 Eine zusätzliche `Content-Security-Policy` lässt nur das Hilfecenter als einbettende Seite zu.
@@ -514,6 +526,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 | Metabase-Dashboards leer, Kacheln melden Fehler | Verbindung zu `lue_reporting` gestört oder Rechte nach Sichten-Neuanlage verloren | Im Tunnel *Admin → Datenbanken → LüMobil Reporting → Verbindung testen*; 4.8.1 erneut ausführen |
 | Dashboards zeigen alte Zahlen | Zwischenspeicher wieder eingeschaltet | Im Tunnel *Admin → Performance → Standardregel* auf „Kein Zwischenspeicher"; siehe 4.8 |
 | Eingebettetes Dashboard im Hilfecenter leer | Token, Freigabe, IP oder CSP — siehe Fehlerbilder in `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Dort Abschnitt 6 |
+| `systemctl reload caddy` schlägt fehl, Konfiguration ist aber gültig | Logverzeichnis fehlt | `mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy` |
 | `https://reporting…/` liefert die Metabase-Anmeldung statt `404` | Caddy-Block fehlt oder ist falsch eingehängt | 4.9 prüfen, `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy` |
 | Platte voll | Archiv oder `_alt` gewachsen | `du -sh /srv/luemobil/* /var/lib/postgresql`. `_alt`-Datenbanken dürfen gelöscht werden |
 
