@@ -320,10 +320,11 @@ aus der Bauphase (IDs 2–5) archivieren und weitere Konten anlegen.
 **Vorher:** `reporting.swl-innovation.de` muss im DNS auf den Server zeigen, sonst bekommt
 Caddy kein Zertifikat. Prüfen mit `dig +short reporting.swl-innovation.de`.
 
-```bash
-# Logverzeichnis muss existieren und Caddy gehören, sonst schlägt das Neuladen fehl
-mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy && chmod 750 /var/log/caddy
+Die Zugriffe landen im Journal (`journalctl -u caddy`), nicht in einer eigenen Datei —
+die systemd-Härtung des Caddy-Dienstes verbietet ihm das Schreiben außerhalb weniger
+Verzeichnisse.
 
+```bash
 # Sauberer als Anhängen ans Caddyfile: eigene Datei, einmalig eingebunden mit
 #   import /etc/caddy/conf.d/*.caddy     (ganz oben im Caddyfile)
 mkdir -p /etc/caddy/conf.d
@@ -489,7 +490,7 @@ docker compose logs -f postgrest                # Fehler der API (ohne Daten)
 ssh -L 3001:127.0.0.1:3001 admin@server      # Oberfläche: http://localhost:3001
 cd /opt/luemobil_reporting && docker compose ps metabase
 docker compose logs -f metabase
-tail -f /var/log/caddy/reporting.log          # eingebettete Zugriffe, Token gekürzt
+journalctl -u caddy -f | grep reporting       # eingebettete Zugriffe, Token gekürzt
 ```
 
 Dashboards ändert man in der Oberfläche über den Tunnel. Neue Dashboards, die das Hilfecenter
@@ -526,7 +527,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 | Metabase-Dashboards leer, Kacheln melden Fehler | Verbindung zu `lue_reporting` gestört oder Rechte nach Sichten-Neuanlage verloren | Im Tunnel *Admin → Datenbanken → LüMobil Reporting → Verbindung testen*; 4.8.1 erneut ausführen |
 | Dashboards zeigen alte Zahlen | Zwischenspeicher wieder eingeschaltet | Im Tunnel *Admin → Performance → Standardregel* auf „Kein Zwischenspeicher"; siehe 4.8 |
 | Eingebettetes Dashboard im Hilfecenter leer | Token, Freigabe, IP oder CSP — siehe Fehlerbilder in `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Dort Abschnitt 6 |
-| `systemctl reload caddy` schlägt fehl, Konfiguration ist aber gültig | Logverzeichnis fehlt | `mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy` |
+| Caddy startet nicht: `open /var/log/caddy/…: permission denied` | Der Dienst darf dort nicht schreiben (systemd-Härtung), auch wenn das Verzeichnis ihm gehört | Im Block `output stderr` statt `output file` — dann steht alles im Journal |
 | `https://reporting…/` liefert die Metabase-Anmeldung statt `404` | Caddy-Block fehlt oder ist falsch eingehängt | 4.9 prüfen, `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy` |
 | Platte voll | Archiv oder `_alt` gewachsen | `du -sh /srv/luemobil/* /var/lib/postgresql`. `_alt`-Datenbanken dürfen gelöscht werden |
 

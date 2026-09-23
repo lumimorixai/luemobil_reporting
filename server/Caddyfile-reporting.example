@@ -30,9 +30,14 @@ reporting.swl-innovation.de {
         -Server
     }
 
-    # Das Token steht im Pfad: im Log durch … ersetzen
+    # Das Token steht im Pfad: im Log durch … ersetzen.
+    # Ausgabe ins Journal (journalctl -u caddy), damit keine Datei und keine
+    # Rechte nötig sind. Wer lieber eine eigene Datei will:
+    #   output file /var/log/caddy/reporting.log
+    # — dann muss das Verzeichnis dem Benutzer caddy gehören UND von der
+    # systemd-Härtung der caddy.service erlaubt sein (ReadWritePaths).
     log {
-        output file /var/log/caddy/reporting.log
+        output stderr
         format filter {
             wrap console
             fields {
