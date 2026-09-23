@@ -35,7 +35,7 @@ if fehlt:
     sys.exit("Fehlende Angaben: " + ", ".join(fehlt))
 
 sitzung = None
-def api(methode, pfad, daten=None):
+def api(methode, pfad, daten=None, fehler_ok=False):
     kopf = {"Content-Type": "application/json"}
     if sitzung:
         kopf["X-Metabase-Session"] = sitzung
@@ -46,12 +46,26 @@ def api(methode, pfad, daten=None):
             inhalt = r.read()
             return json.loads(inhalt) if inhalt else None
     except urllib.error.HTTPError as e:
+        if fehler_ok:
+            return None
         sys.exit(f"FEHLER {methode} {pfad}: HTTP {e.code} — {e.read().decode(errors='replace')[:300]}")
+
+def anmelden():
+    """Erst das Demo-Konto, dann das Admin-Konto — damit das Skript auch beim
+    zweiten Lauf funktioniert, wenn das Demo-Konto bereits deaktiviert ist."""
+    for name, daten in (("Demo-Konto", DEMO),
+                        ("Admin-Konto", {"username": ADMIN["email"], "password": ADMIN["password"]})):
+        antwort = api("POST", "/api/session", daten, fehler_ok=True)
+        if antwort:
+            print(f"  angemeldet über das {name}")
+            return antwort["id"]
+    sys.exit("Anmeldung fehlgeschlagen — weder Demo- noch Admin-Konto akzeptiert. "
+             "Passwörter in der .env prüfen (MB_ADMIN_*).")
 
 def schritt(text): print(f"  {text}")
 
 print(f"Metabase: {URL}")
-sitzung = api("POST", "/api/session", DEMO)["id"]
+sitzung = anmelden()
 datenbanken = {d["name"]: d for d in api("GET", "/api/database")["data"]}
 
 # 1. Reporting-Verbindung auf den Lesezugang umstellen
@@ -81,7 +95,7 @@ if ADMIN["email"] not in konten:
     schritt(f"4. Admin-Konto {ADMIN['email']} angelegt")
 sitzung = api("POST", "/api/session", {"username": ADMIN["email"], "password": ADMIN["password"]})["id"]
 demo = konten.get(DEMO["username"])
-if demo and demo.get("is_active"):
+if demo and demo.get("is_active") and demo["email"] != ADMIN["email"]:
     api("DELETE", f"/api/user/{demo['id']}")
     schritt(f"   Demo-Konto {DEMO['username']} deaktiviert")
 
