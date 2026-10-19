@@ -147,15 +147,37 @@ mit einer anderen Adresse bestellt, erscheint deshalb als „nicht versendet“.
 
 Die Tabelle zeigt höchstens 2.000 Zeilen. Der CSV-Download unten rechts enthält alle.
 
-Auf dem Server über den Tunnel ausführen:
+**Auf dem Server** läuft das Skript als Dienst im Docker-Netz, ganz ohne Tunnel. Die
+Zugangsdaten kommen aus der `.env` (`MB_ADMIN_EMAIL`, `MB_ADMIN_PASSWORT`):
 
 ```bash
-ssh -L 3001:127.0.0.1:3001 admin@server      # offen lassen
-MB_URL=http://localhost:3001 MB_EMAIL=… MB_PASSWORT=… python3 metabase-setup/12_kundenliste.py
+cd /opt/luemobil_reporting && git pull
+docker compose run --rm kundenliste                  # Frage anlegen, Zahlen prüfen
 ```
 
-Der Probelauf am Ende zählt für den aktuellen Monat. `MONAT=2026-09` zählt für einen
-anderen, etwa mit den Demo-Daten vom September.
+**Liste als CSV ohne Browser:** `--csv` schreibt sie auf die Standardausgabe.
+
+```bash
+docker compose run --rm -T kundenliste --csv --versendet ja > /root/kundenliste.csv
+scp <benutzer>@reporting.swl-innovation.de:/root/kundenliste.csv ~/Downloads/   # auf dem Mac
+rm /root/kundenliste.csv                                                         # auf dem Server
+```
+
+`-T` ist Pflicht. Ohne diese Option vermischt Docker die Meldungen mit der Liste.
+
+| Option | Bedeutung |
+|---|---|
+| `--versendet ja` / `nein` | nur mit oder ohne versendetes Ticket (weggelassen: alle) |
+| `--monat 2026-10` | Versandmonat (weggelassen: aktueller Monat) |
+| `--ticket 9995` | nur dieses Ticket, mehrfach möglich (weggelassen: beide) |
+
+Die Optionen gelten auch für den Probelauf ohne `--csv`. In der Demo liegen die Daten
+im September: `python3 metabase-setup/12_kundenliste.py --monat 2026-09`.
+
+**Ansehen in der Oberfläche** geht weiterhin nur über den Tunnel
+(`ssh -N -L 3001:127.0.0.1:3001 <benutzer>@reporting.swl-innovation.de`, dann
+`http://localhost:3001`). Das Skript lässt sich auch von dort aus starten:
+`MB_URL=http://localhost:3001 MB_EMAIL=… MB_PASSWORT=… python3 metabase-setup/12_kundenliste.py`.
 
 Die Liste enthält Personendaten. Sie gehört auf kein Dashboard, das ins Hilfecenter
 eingebettet wird.

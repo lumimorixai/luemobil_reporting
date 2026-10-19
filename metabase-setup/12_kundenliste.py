@@ -7,17 +7,22 @@ und ob im gewählten Monat ein Ticket versendet wurde.
 Filter oben: Ticket (vorbelegt: beide), Monat (vorbelegt: aktueller),
 Ticket versendet ja/nein (leer: alle). Unten lädt man die Liste als CSV.
 
+Mit --csv schreibt es die Liste zusätzlich als CSV auf die Standardausgabe,
+ganz ohne Browser. Meldungen gehen dann auf die Fehlerausgabe.
+
 Enthält Personendaten. Die Frage gehört NICHT auf ein Dashboard fürs
 Hilfecenter, sondern ist nur in der Metabase-Oberfläche erreichbar.
 
-  Demo:    python3 metabase-setup/12_kundenliste.py
-  Server:  ssh -L 3001:127.0.0.1:3001 admin@server   # offen lassen, dann
-           MB_URL=http://localhost:3001 MB_EMAIL=… MB_PASSWORT=… \\
+  Demo:    python3 metabase-setup/12_kundenliste.py [--csv …]
+  Server:  docker compose run --rm kundenliste                      # einrichten
+           docker compose run --rm -T kundenliste --csv --versendet ja > liste.csv
+           (-T ist Pflicht: ohne landen Meldungen in der Datei)
+  Tunnel:  MB_URL=http://localhost:3001 MB_EMAIL=… MB_PASSWORT=… \\
              python3 metabase-setup/12_kundenliste.py
 
 Idempotent: Gibt es die Frage schon, wird sie auf diesen Stand gebracht.
 """
-import csv, io, json, os, urllib.error, urllib.parse, urllib.request, uuid
+import argparse, csv, io, json, os, re, sys, urllib.error, urllib.parse, urllib.request, uuid
 
 BASE = os.environ.get("MB_URL", "http://localhost:3030").rstrip("/")
 ANMELDUNG = {"username": os.environ.get("MB_EMAIL", "demo@luemobil.local"),
@@ -25,6 +30,21 @@ ANMELDUNG = {"username": os.environ.get("MB_EMAIL", "demo@luemobil.local"),
 NAME = "Kundenliste nach Ticket (9995 / 9999)"
 TICKETS = ["9995", "9999"]
 tok = None
+
+def monat_pruefen(w):
+    if w != "thismonth" and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", w):
+        raise argparse.ArgumentTypeError("Monat als JJJJ-MM angeben, z. B. 2026-10")
+    return w
+ap = argparse.ArgumentParser(description="Kundenliste der Abo-Berechtigten nach Ticket")
+ap.add_argument("--csv", action="store_true", help="Liste als CSV auf die Standardausgabe")
+ap.add_argument("--monat", default="thismonth", type=monat_pruefen,
+                help="Versandmonat JJJJ-MM (Standard: aktueller Monat)")
+ap.add_argument("--versendet", choices=["ja", "nein"], help="nur mit / ohne versendetes Ticket")
+ap.add_argument("--ticket", action="append", choices=TICKETS,
+                help="nur dieses Ticket (mehrfach möglich, Standard: beide)")
+args = ap.parse_args()
+# Bei --csv gehört die Standardausgabe allein der Liste
+melden = lambda *t: print(*t, file=sys.stderr if args.csv else sys.stdout)
 
 def call(p, d=None, m=None):
     r = urllib.request.Request(BASE + p, data=json.dumps(d).encode() if d is not None else None,
@@ -144,31 +164,39 @@ karte = {
 }
 if vorhanden:
     call(f"/api/card/{vorhanden['id']}", karte, m="PUT"); cid = vorhanden["id"]
-    print(f"Frage aktualisiert (ID {cid})")
+    melden(f"Frage aktualisiert (ID {cid})")
 else:
     cid = call("/api/card", karte)["id"]
-    print(f"Frage angelegt (ID {cid})")
+    melden(f"Frage angelegt (ID {cid})")
 
-# Probelauf mit der Vorbelegung
-# (MONAT=JJJJ-MM für einen anderen Monat, etwa mit den Demo-Daten vom September)
-monat = os.environ.get("MONAT", "thismonth")
-def zaehlen(versendet=None):
-    p = [{"id": tags["ticket"]["id"], "type": "string/=", "value": TICKETS,
+def liste(tickets, monat, versendet=None, formatiert=False):
+    """Die Liste über den CSV-Download — die Abfrage selbst liefert höchstens 2000 Zeilen."""
+    p = [{"id": tags["ticket"]["id"], "type": "string/=", "value": tickets,
           "target": ["dimension", ["template-tag", "ticket"]]},
          {"id": tags["monat"]["id"], "type": "date/all-options", "value": monat,
           "target": ["dimension", ["template-tag", "monat"]]}]
     if versendet:
         p.append({"id": tags["versendet"]["id"], "type": "string/=", "value": [versendet],
                   "target": ["variable", ["template-tag", "versendet"]]})
-    # Über den CSV-Download zählen: die Abfrage selbst liefert höchstens 2000 Zeilen
+    daten = {"parameters": json.dumps(p)}
+    if formatiert:  # wie der Download in der Oberfläche: Datum als 1.9.2026
+        daten["format_rows"] = "true"
     r = urllib.request.Request(f"{BASE}/api/card/{cid}/query/csv", method="POST",
-        data=urllib.parse.urlencode({"parameters": json.dumps(p)}).encode(),
-        headers={"X-Metabase-Session": tok})
-    with urllib.request.urlopen(r, timeout=180) as x:
-        zeilen = list(csv.reader(io.StringIO(x.read().decode("utf-8-sig"))))
-    if not zeilen or zeilen[0][0] != "E-Mail":
-        raise SystemExit(f"Probelauf fehlgeschlagen: {zeilen[:2]}")
-    return len(zeilen) - 1
-print(f"  {zaehlen()} Personen mit Ticket {' oder '.join(TICKETS)}")
-print(f"  davon mit versendetem Ticket ({monat}): {zaehlen('ja')}, ohne: {zaehlen('nein')}")
-print(f"  Öffnen: {BASE}/question/{cid}")
+        data=urllib.parse.urlencode(daten).encode(), headers={"X-Metabase-Session": tok})
+    with urllib.request.urlopen(r, timeout=600) as x:
+        text = x.read().decode("utf-8-sig")
+    if not text.startswith("E-Mail,"):
+        raise SystemExit(f"Abfrage fehlgeschlagen: {text[:250]}")
+    return text
+
+tickets = args.ticket or TICKETS
+if args.csv:
+    text = liste(tickets, args.monat, args.versendet, formatiert=True)
+    sys.stdout.write(text)
+    melden(f"  {len(list(csv.reader(io.StringIO(text)))) - 1} Personen "
+           f"(Ticket {' oder '.join(tickets)}, Monat {args.monat}, versendet: {args.versendet or 'alle'})")
+else:
+    zaehlen = lambda v=None: len(list(csv.reader(io.StringIO(liste(tickets, args.monat, v))))) - 1
+    melden(f"  {zaehlen()} Personen mit Ticket {' oder '.join(tickets)}")
+    melden(f"  davon mit versendetem Ticket ({args.monat}): {zaehlen('ja')}, ohne: {zaehlen('nein')}")
+    melden(f"  Öffnen: {BASE}/question/{cid}")

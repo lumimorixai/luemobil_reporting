@@ -493,6 +493,15 @@ docker compose logs -f metabase
 journalctl -u caddy -f | grep reporting       # eingebettete Zugriffe, Token gekürzt
 ```
 
+**Kundenliste der Abo-Berechtigten** (Ticket 9995/9999, Versandstatus im Monat) ohne Tunnel
+als CSV — Einzelheiten in `metabase-setup/README.md`, Abschnitt „Kundenliste nach Ticket":
+
+```bash
+docker compose run --rm kundenliste                  # einmalig: Frage in Metabase anlegen
+docker compose run --rm -T kundenliste --csv --versendet ja > /root/kundenliste.csv
+# abholen mit scp, danach auf dem Server löschen — die Datei enthält Personendaten
+```
+
 Dashboards ändert man in der Oberfläche über den Tunnel. Neue Dashboards, die das Hilfecenter
 zeigen soll, brauchen *Teilen → Einbetten → Statische Einbettung → Veröffentlichen*, und das
 Hilfecenter braucht die neue Dashboard-ID.
@@ -668,7 +677,7 @@ Auftragsverarbeitung mit dem Hoster des virtuellen Servers.
 | `server/nginx-reporting.conf` | nginx: nur Einbettung, CSP auf das Hilfecenter beschränkt |
 | `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Anleitung fürs Hilfecenter zum Einbetten |
 | `metabase-setup/einbettung_pruefen.py` | Prüft die Einbettung, erzeugt eine Testseite |
-| `metabase-setup/12_kundenliste.py` | Metabase-Frage: Abo-Berechtigte 9995/9999 mit Versandstatus, CSV-Download |
+| `metabase-setup/12_kundenliste.py` | Metabase-Frage: Abo-Berechtigte 9995/9999 mit Versandstatus, CSV-Download (`docker compose run --rm kundenliste`) |
 
 ---
 
