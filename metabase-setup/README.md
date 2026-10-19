@@ -127,6 +127,39 @@ Ein `DROP VIEW ... CASCADE` auf eine der linken Views reisst die rechten mit.
 nach jeder Änderung an `kunde_360`, `bestellung` oder `produkt` erneut auszuführen.
 
 
+## Kundenliste nach Ticket
+
+`12_kundenliste.py` legt die Frage „Kundenliste nach Ticket (9995 / 9999)“ an: alle
+Abo-Berechtigten mit Ticket 9995 und/oder 9999, eine Zeile je Person (E-Mail, Name,
+Kundennummer, Ticket, PLZ, Ort, Gültigkeit, App-Konto). Dazu je Person, ob im gewählten
+Monat ein Ticket versendet wurde, wie viele und wann zuletzt.
+
+| Filter | Vorbelegung |
+|---|---|
+| Ticket | 9995 und 9999 |
+| Versendet im Monat | aktueller Monat |
+| Ticket versendet | leer = alle; `ja` oder `nein` |
+
+**Versendet** heißt: eine Bestellung im Status 3 „Versendet“ oder 47 „Versendet und
+ausgecheckt“, gekauft im gewählten Monat. Berechtigung und Bestellung werden über die
+normalisierte E-Mail verbunden, denn `order_number` ist im Bestand leer. Wer in der App
+mit einer anderen Adresse bestellt, erscheint deshalb als „nicht versendet“.
+
+Die Tabelle zeigt höchstens 2.000 Zeilen. Der CSV-Download unten rechts enthält alle.
+
+Auf dem Server über den Tunnel ausführen:
+
+```bash
+ssh -L 3001:127.0.0.1:3001 admin@server      # offen lassen
+MB_URL=http://localhost:3001 MB_EMAIL=… MB_PASSWORT=… python3 metabase-setup/12_kundenliste.py
+```
+
+Der Probelauf am Ende zählt für den aktuellen Monat. `MONAT=2026-09` zählt für einen
+anderen, etwa mit den Demo-Daten vom September.
+
+Die Liste enthält Personendaten. Sie gehört auf kein Dashboard, das ins Hilfecenter
+eingebettet wird.
+
 ## Gestaltung
 
 `09_gestaltung.py`, `10_feinschliff.py` und `11_layout.py` setzen Zahlenformate,

@@ -606,6 +606,7 @@ Wichtig: Dieselbe Metabase-Version wie zum Zeitpunkt der Sicherung verwenden, un
 | `protokoll.abfrage` | gesuchte E-Mail-Adresse, Bearbeiter, IP | 12 Monate (Vorschlag) | nur Datenbank-Administratoren |
 | `/var/backups/luemobil` | Abfrageprotokoll | 30 Tage | nur `postgres` (700) |
 | `metabase_app` | Metabase-Konten (Name, E-Mail), keine Kundendaten | dauerhaft | nur `metabase_app` |
+| Metabase-Frage „Kundenliste nach Ticket (9995 / 9999)" | E-Mail, Name, Abo-Kundennummer, PLZ, Ort aller Abo-Berechtigten, Versandstatus des Tickets; als CSV ladbar | jeweils aktueller Stand; heruntergeladene CSV-Dateien liegen beim Bearbeiter | Metabase-Konten mit Zugriff auf die Sammlung „LüMobil Vertrieb", nicht eingebettet |
 | Dashboard „4 — Betrieb und Störungen" | Tabelle mit einzelnen Bestellungen (Bestellnummer) | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
 | Caddy-Log `reporting` | IP-Adresse, Token gekürzt, keine E-Mail | Log-Rotation von Caddy | root |
 | Container-Logs (`docker compose logs`) | IP-Adresse, keine E-Mail, keine Tokens | Docker-Log-Rotation | root |
@@ -616,7 +617,8 @@ Löschung des Abfrageprotokolls monatlich, z. B. per `/etc/cron.d/luemobil`:
 0 5 1 * * postgres psql -d lue_reporting -qc "SELECT protokoll.aufraeumen(12)"
 ```
 
-Offene Punkte mit dem Datenschutz: Aufbewahrungsfrist des Abfrageprotokolls,
+Offene Punkte mit dem Datenschutz: wer die Kundenliste herunterladen darf und wie lange
+die CSV-Dateien aufbewahrt werden, Aufbewahrungsfrist des Abfrageprotokolls,
 Eintrag „Auskunft im Hilfecenter“ ins Verzeichnis der Verarbeitungstätigkeiten,
 Auftragsverarbeitung mit dem Hoster des virtuellen Servers.
 
@@ -666,6 +668,7 @@ Auftragsverarbeitung mit dem Hoster des virtuellen Servers.
 | `server/nginx-reporting.conf` | nginx: nur Einbettung, CSP auf das Hilfecenter beschränkt |
 | `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Anleitung fürs Hilfecenter zum Einbetten |
 | `metabase-setup/einbettung_pruefen.py` | Prüft die Einbettung, erzeugt eine Testseite |
+| `metabase-setup/12_kundenliste.py` | Metabase-Frage: Abo-Berechtigte 9995/9999 mit Versandstatus, CSV-Download |
 
 ---
 
