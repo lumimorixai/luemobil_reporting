@@ -455,6 +455,106 @@ LEFT JOIN tk t
 GROUP BY 1, 2;
 
 -- =====================================================================
+-- rpt.abo_fahrgast — wer auf einem Abo-Ticket steht
+-- =====================================================================
+-- Ein App-Konto kann Abos für mehrere Personen führen (Eltern für ihre
+-- Kinder). Wer gemeint ist, steht nur im Ticket: orders_products.custom1
+-- -> persons[]. person_schluessel = Vorname|Nachname|Geburtsdatum, klein.
+CREATE OR REPLACE VIEW rpt.abo_fahrgast AS
+WITH pos AS MATERIALIZED (
+  SELECT position_id, bestellung_id, kunde_id, erfolgreich, gueltigkeitsmonat
+  FROM rpt.bestellposition WHERE vertriebskanal = 'Abo'
+)
+SELECT
+  pos.position_id, pos.bestellung_id, pos.kunde_id, pos.erfolgreich, pos.gueltigkeitsmonat,
+  btrim(coalesce(pe ->> 'firstName', '') || ' ' || coalesce(pe ->> 'lastName', '')) AS fahrgast,
+  nullif(left(pe ->> 'dateOfBirth', 10), '')                                        AS geburtsdatum,
+  lower(btrim(coalesce(pe ->> 'firstName', ''))) || '|' || lower(btrim(coalesce(pe ->> 'lastName', '')))
+    || '|' || coalesce(left(pe ->> 'dateOfBirth', 10), '')                          AS person_schluessel
+FROM pos
+JOIN src_swl.orders_products op ON op.orders_products_id = pos.position_id
+CROSS JOIN LATERAL jsonb_array_elements(
+  CASE WHEN op.custom1 LIKE '{%' THEN coalesce(op.custom1::jsonb -> 'persons', '[]') ELSE '[]' END) pe;
+
+-- =====================================================================
+-- rpt.abo_stoerung — jedes "gestörte" Abo mit Klärung
+-- =====================================================================
+-- Dreizehnte Falle — gestört heißt stillgelegt. Die Quelle setzt problem = 1,
+-- wenn sie ein Abo stilllegt, und benennt den Code um: R-<Datum>-<Nr>-LUB#…,
+-- damit der ursprüngliche Code für ein neues Abo frei wird. Einen
+-- Störungstext liefert sie nicht. Ob etwas zu tun ist, zeigt erst der
+-- Fahrgast: Hat er im Bestandsmonat ein Ticket (auch in einem anderen Konto)?
+-- Ist er überhaupt noch berechtigt (Kundennummer aus custom3 oder Person)?
+CREATE OR REPLACE VIEW rpt.abo_stoerung AS
+WITH monat AS (
+  SELECT date_trunc('month', max(gueltig_ab))::date AS m FROM rpt.abo_berechtigung
+), fg AS MATERIALIZED (
+  SELECT * FROM rpt.abo_fahrgast
+), bestand AS MATERIALIZED (
+  SELECT DISTINCT customer_number AS kdnr,
+         lower(btrim(coalesce(first_name, ''))) || '|' || lower(btrim(coalesce(last_name, '')))
+           || '|' || coalesce(left(btrim(birthday), 10), '') AS person_schluessel
+  FROM src_mpswl.abo_berechtigungen_luebeck
+), aktiv AS MATERIALIZED (   -- Personen mit einem laufenden Abo
+  SELECT DISTINCT fg.person_schluessel
+  FROM src_mpswl.kk_subscription x JOIN fg ON fg.bestellung_id = x.orders_id
+  WHERE x.active = 1
+), g AS MATERIALIZED (
+  SELECT s.kk_subscription_id AS abo_id, s.subscription_code AS abo_code,
+         s.customers_id AS kunde_id, s.orders_id AS bestellung_id, s.products_sku AS sku,
+         nullif(btrim(s.custom3), '') AS kdnr,
+         s.start_date::date AS laeuft_seit, s.last_billing_date::date AS letzte_abrechnung,
+         s.next_billing_date::date AS naechste_abrechnung,
+         nullif(btrim(s.problem_description), '') AS stoerungstext,
+         CASE WHEN s.subscription_code ~ '^R-[0-9]{8}-'
+              THEN to_date(substring(s.subscription_code FROM '^R-([0-9]{8})-'), 'YYYYMMDD') END AS stillgelegt_am
+  FROM src_mpswl.kk_subscription s WHERE s.problem = 1
+), gp AS (
+  SELECT g.*,
+         (SELECT min(f.person_schluessel) FROM fg f WHERE f.bestellung_id = g.bestellung_id) AS person_schluessel,
+         (SELECT min(f.fahrgast)          FROM fg f WHERE f.bestellung_id = g.bestellung_id) AS fahrgast,
+         (SELECT min(f.geburtsdatum)      FROM fg f WHERE f.bestellung_id = g.bestellung_id) AS geburtsdatum
+  FROM g
+), k AS (
+  SELECT gp.*,
+    EXISTS (SELECT 1 FROM fg f WHERE f.person_schluessel = gp.person_schluessel AND f.erfolgreich
+              AND f.gueltigkeitsmonat = (SELECT m FROM monat) AND f.kunde_id = gp.kunde_id)  AS ticket_selbes_konto,
+    EXISTS (SELECT 1 FROM fg f WHERE f.person_schluessel = gp.person_schluessel AND f.erfolgreich
+              AND f.gueltigkeitsmonat = (SELECT m FROM monat))                                AS ticket_im_monat,
+    EXISTS (SELECT 1 FROM fg f WHERE f.person_schluessel = gp.person_schluessel AND f.erfolgreich
+              AND f.gueltigkeitsmonat = ((SELECT m FROM monat) - interval '1 month')::date)   AS ticket_vormonat,
+    EXISTS (SELECT 1 FROM bestand b WHERE b.kdnr = gp.kdnr
+              OR b.person_schluessel = gp.person_schluessel)                                  AS berechtigt_im_monat,
+    EXISTS (SELECT 1 FROM aktiv a WHERE a.person_schluessel = gp.person_schluessel)          AS aktives_abo_fahrgast
+  FROM gp
+)
+SELECT
+  k.abo_id, k.abo_code,
+  CASE k.sku WHEN '541' THEN 'Deutschlandticket 2. Kl'
+             WHEN '548' THEN 'Deutschlandticket Schule' ELSE k.sku END AS produkt,
+  k.kunde_id,
+  coalesce(c.kunde_email, b.kunde_email)        AS kunde_email,
+  c.name                                        AS kontoinhaber,
+  (c.kunde_id IS NOT NULL)                      AS konto_vorhanden,
+  k.fahrgast, k.geburtsdatum,
+  k.laeuft_seit, k.letzte_abrechnung, k.naechste_abrechnung, k.stillgelegt_am, k.stoerungstext,
+  (SELECT m FROM monat)                         AS bestandsmonat,
+  k.ticket_im_monat, k.ticket_selbes_konto, k.ticket_vormonat, k.berechtigt_im_monat, k.aktives_abo_fahrgast,
+  CASE WHEN k.ticket_selbes_konto    THEN 1
+       WHEN k.ticket_im_monat        THEN 2
+       WHEN k.aktives_abo_fahrgast   THEN 3
+       WHEN k.berechtigt_im_monat    THEN 4
+       ELSE 5 END                               AS klaerung_nr,
+  CASE WHEN k.ticket_selbes_konto    THEN 'erledigt: Ticket im selben Konto'
+       WHEN k.ticket_im_monat        THEN 'erledigt: Ticket in anderem Konto'
+       WHEN k.aktives_abo_fahrgast   THEN 'prüfen: aktives Abo, aber kein Ticket'
+       WHEN k.berechtigt_im_monat    THEN 'offen: berechtigt, ohne Abo und Ticket'
+       ELSE 'beendet: nicht mehr berechtigt' END AS klaerung
+FROM k
+LEFT JOIN rpt.kunde_360 c  ON c.kunde_id = k.kunde_id
+LEFT JOIN rpt.bestellung b ON b.bestellung_id = k.bestellung_id;
+
+-- =====================================================================
 -- rpt.bestellergebnis — wie jede Bestellung ausging (vor allem PayOne)
 -- =====================================================================
 CREATE OR REPLACE VIEW rpt.bestellergebnis AS
@@ -614,8 +714,10 @@ FROM (VALUES
 -- rpt.arbeitsliste — um die Fälle aus dem Livebetrieb ergänzt
 -- =====================================================================
 CREATE OR REPLACE VIEW rpt.arbeitsliste AS
-SELECT 'Abos mit Störung' AS liste, 'Service ruft an' AS zweck,
-       (SELECT count(*) FROM rpt.abo WHERE stoerung) AS faelle
+SELECT 'Gestörte Abos, offen' AS liste, 'Service: berechtigt, aber weder Abo noch Ticket' AS zweck,
+       (SELECT count(*) FROM rpt.abo_stoerung WHERE klaerung_nr = 4) AS faelle
+UNION ALL SELECT 'Gestörte Abos, prüfen', 'Aktives Abo, aber kein Ticket im Monat',
+       (SELECT count(*) FROM rpt.abo_stoerung WHERE klaerung_nr = 3)
 UNION ALL SELECT 'Berechtigt, nicht aktiviert', 'Kampagnenselektion nach PLZ',
        (SELECT count(*) FROM rpt.abo_berechtigung WHERE NOT aktiviert AND ist_hauptzeile)
 UNION ALL SELECT 'Konten ohne Kauf', 'registriert, nie bestellt',

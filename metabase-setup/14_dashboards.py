@@ -69,12 +69,16 @@ def balken(x, reihen, farben, gestapelt=False, **mehr):
 
 # --- Fragen ---------------------------------------------------------------
 K = {}
-def frage(name, sql, anzeige="table", beschreibung=None, viz=None):
+def frage(name, sql, anzeige="table", beschreibung=None, viz=None, frueher=()):
     """Legt eine SQL-Frage an oder bringt die vorhandene auf diesen Stand.
-    viz=None lässt die Gestaltung einer vorhandenen Frage unverändert."""
+    viz=None lässt die Gestaltung einer vorhandenen Frage unverändert.
+    frueher: alte Namen — die Frage wird umbenannt, ihre ID bleibt."""
     abfrage = {"type": "native", "database": db_id, "native": {"query": sql}}
+    alt = next((n for n in frueher if n in vorhanden and name not in vorhanden), None)
+    if alt:
+        vorhanden[name] = vorhanden.pop(alt)
     if name in vorhanden:
-        body = {"dataset_query": abfrage, "display": anzeige, "description": beschreibung}
+        body = {"name": name, "dataset_query": abfrage, "display": anzeige, "description": beschreibung}
         if viz is not None: body["visualization_settings"] = viz
         call(f"/api/card/{vorhanden[name]}", body, m="PUT")
     else:
@@ -321,12 +325,24 @@ frage("Abo-Tickets je Ausstellungstag",
     """SELECT tag AS "Tag", abo_tickets AS "Abo-Tickets" FROM rpt.tagesreihe ORDER BY tag""", "bar",
     "Wann Abo-Tickets ausgestellt werden: der große Lauf am 27., danach Nachzügler und Neukunden.",
     {**balken("Tag", ["Abo-Tickets"], [TEAL]), **spalten(Tag=DAT)})
-frage("Gestörte Abos nach Produkt",
-    """SELECT produkt AS "Produkt", count(*) FILTER (WHERE aktiv) AS "Aktiv",
-              count(*) FILTER (WHERE stoerung) AS "Gestört",
-              count(*) FILTER (WHERE stoerung AND coalesce(btrim(stoerungstext), '') = '') AS "ohne Störungstext"
-       FROM rpt.abo GROUP BY 1 ORDER BY 1""", "table",
-    "Gestörte Abos sind inaktiv. Die Quelle liefert meist keinen Störungstext.")
+frage("Gestörte Abos, offen",
+    """SELECT count(*) AS "Abos" FROM rpt.abo_stoerung WHERE klaerung_nr = 4""", "scalar",
+    "Stillgelegte Abos, deren Fahrgast im Monat berechtigt ist, aber weder ein Abo noch ein Ticket hat. "
+    "Die Quelle markiert jedes stillgelegte Abo als gestört — die übrigen sind erledigt oder beendet (Board 6).",
+    zahl("Abos"), frueher=("Abos mit Störung",))
+frage("Gestörte Abos nach Klärung",
+    """SELECT klaerung AS "Klärung", count(*) AS "Abos" FROM rpt.abo_stoerung
+       GROUP BY klaerung_nr, klaerung ORDER BY klaerung_nr""", "row",
+    "Jedes als gestört markierte Abo, eingeordnet über den Fahrgast: Ticket im Monat? Noch berechtigt?",
+    {"graph.dimensions": ["Klärung"], "graph.metrics": ["Abos"],
+     "series_settings": {"Abos": {"color": ROT}}})
+frage("Gestörte Abos nach Stilllegungstag",
+    """SELECT stillgelegt_am AS "Stillgelegt am", count(*) AS "Abos",
+              count(*) FILTER (WHERE klaerung_nr = 4) AS "davon offen"
+       FROM rpt.abo_stoerung GROUP BY 1 ORDER BY 1""", "bar",
+    "Das Datum steht im umbenannten Abo-Code. Spitzen am Monatsersten: Bestandswechsel.",
+    {**balken("Stillgelegt am", ["Abos", "davon offen"], [GRAU, ROT]), **spalten(Stillgelegt_am=DAT)})
+
 
 # ---- Board 7: App-Nutzung ----------------------------------------------
 NUTZ = "FROM rpt.app_nutzung"
@@ -439,7 +455,7 @@ B[2] = board("2 — Abo-Bestand", "Überführung des Abo-Bestands in die App.", 
   *kopf("Abo-Bestand und Überführung", "Der Bestand wird jeden Monat vollständig ersetzt. Alle Quoten "
         "zählen Personen, nicht Zeilen. Wer im Monat ein gültiges Ticket hat: Board 5."),
   ("Berechtigungen gesamt", 0, 2, 5, 3), ("Aktivierungsquote Bestand", 5, 2, 5, 3),
-  ("Berechtigte ohne App-Konto", 10, 2, 5, 3), ("Aktive Abos", 15, 2, 5, 3), ("Abos mit Störung", 20, 2, 4, 3),
+  ("Berechtigte ohne App-Konto", 10, 2, 5, 3), ("Aktive Abos", 15, 2, 5, 3), ("Gestörte Abos, offen", 20, 2, 4, 3),
   ("Überführungstrichter", 0, 5, 12, 7), ("Aktivierung je Bestandssegment", 12, 5, 12, 7),
   ("Altersprofil der Berechtigten", 0, 12, 12, 7), ("Arbeitslisten", 12, 12, 12, 7),
   ("Aktivierung nach Postleitzahl", 0, 19, 24, 9),
@@ -467,7 +483,7 @@ B[3] = board("3 — Einzeltickets und PayOne", "Einzel- und Fährtickets über P
 B[4] = board("4 — Betrieb und Störungen", "Für Service und Betrieb.", [
   *kopf("Betrieb und Störungen", "Wie Bestellungen ausgehen, wie schnell Tickets kommen und was "
         "abzuarbeiten ist. Die Abo-Verlängerung am 27. des Monats: Board 6."),
-  ("Erfolgsquote", 0, 2, 5, 3), ("Abbrüche", 5, 2, 5, 3), ("Abos mit Störung", 10, 2, 5, 3),
+  ("Erfolgsquote", 0, 2, 5, 3), ("Abbrüche", 5, 2, 5, 3), ("Gestörte Abos, offen", 10, 2, 5, 3),
   ("Geräte", 15, 2, 4, 3), ("Durchlaufzeit bis zum Ticket", 19, 2, 5, 3),
   ("Bestellstrecke", 0, 5, 12, 6), ("Abbrüche nach Ursache", 12, 5, 12, 6),
   ("Geräteplattform", 0, 11, 8, 8), ("Arbeitslisten", 8, 11, 16, 8),
@@ -491,12 +507,15 @@ B[6] = board("6 — Abo-Verlängerung", "Der Verlängerungslauf am 27. und die K
   *kopf("Abo-Verlängerung", "Am Abrechnungstag (27.) stellt das System für alle aktiven Abos das Ticket "
         "des Folgemonats aus. Hier: was ansteht, was durchgelaufen ist und wo es hakt."),
   ("Nächster Abrechnungstag", 0, 2, 6, 3), ("Abos zur Verlängerung", 6, 2, 6, 3),
-  ("Folgemonat schon ausgestellt", 12, 2, 6, 3), ("Abos mit Störung", 18, 2, 6, 3),
+  ("Folgemonat schon ausgestellt", 12, 2, 6, 3), ("Gestörte Abos, offen", 18, 2, 6, 3),
   ("Verlängerung nach Abrechnungstag", 0, 5, 12, 7), ("Abo-Tickets je Ausstellungstag", 12, 5, 12, 7),
   ("Abo-Tickets je Monat", 0, 12, 12, 7), ("Kundenbindung je Monat", 12, 12, 12, 7),
-  ("Gestörte Abos nach Produkt", 0, 19, 12, 4),
-  ("TEXT", "Gestörte Abos sind inaktiv und werden nicht verlängert. Wer betroffen ist, steht in der "
-           "Kundenliste (Abo gestört) — nur in Metabase selbst, nicht eingebettet.", 12, 19, 12, 4)])
+  ("Gestörte Abos nach Klärung", 0, 19, 12, 6), ("Gestörte Abos nach Stilllegungstag", 12, 19, 12, 6),
+  ("TEXT", "**Gestört heißt stillgelegt.** Die Quelle markiert jedes stillgelegte Abo als gestört und benennt "
+           "seinen Code um (`R-<Datum>-…`). Ob etwas zu tun ist, zeigt der Fahrgast: Hat er im Monat ein Ticket, "
+           "auch in einem anderen Konto, ist der Fall erledigt. Steht er nicht mehr im Bestand, ist das Abo zu "
+           "Recht beendet. **Offen** sind nur Berechtigte ohne Abo und Ticket. Wer das ist, zeigt die "
+           "„Gestörte Abos – Klärliste“ in Metabase (nicht eingebettet, enthält Personendaten).", 0, 25, 24, 3)])
 
 B[7] = board("7 — App-Nutzung", "Konten, Einwilligungen und Kaufverhalten in der App.", [
   *kopf("App-Nutzung", "Konten, Neuanmeldungen, Einwilligungen und Kaufverhalten. Logins wertet das "
@@ -509,6 +528,10 @@ B[7] = board("7 — App-Nutzung", "Konten, Einwilligungen und Kaufverhalten in d
   ("Geräteplattform", 16, 11, 8, 6),
   ("Kaufzeitpunkt im Tagesverlauf", 0, 17, 12, 6), ("Einwilligungen je Kontaktweg", 12, 17, 12, 6),
   ("Konten nach Registrierungsmonat", 0, 23, 24, 5)])
+
+# Nicht mehr auf einem Board: archivieren statt löschen
+for alt in ("Gestörte Abos nach Produkt",):
+    if alt in vorhanden: call(f"/api/card/{vorhanden[alt]}", {"archived": True}, m="PUT")
 
 if fehler_raster:
     print("RASTER:", *fehler_raster, sep="\n  "); sys.exit(1)

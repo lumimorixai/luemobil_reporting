@@ -45,6 +45,9 @@ ap.add_argument("--monat", default="thismonth", type=monat_pruefen,
 ap.add_argument("--versendet", choices=["ja", "nein"], help="nur mit / ohne versendetes Ticket")
 ap.add_argument("--ticket", action="append", choices=TICKETS,
                 help="nur dieses Ticket (mehrfach möglich, Standard: beide)")
+ap.add_argument("--stoerung", nargs="?", const="offen", choices=["offen", "alle"],
+                help="mit --csv: statt der Kundenliste die Klärliste der gestörten Abos "
+                     "(Standard: nur offene Fälle)")
 args = ap.parse_args()
 # Bei --csv gehört die Standardausgabe allein der Liste
 melden = lambda *t: print(*t, file=sys.stderr if args.csv else sys.stdout)
@@ -125,7 +128,7 @@ SELECT
   l.gueltig_bis              AS "Gültig bis",
   l.app_konto                AS "App-Konto",
   coalesce(a.aktiv, false)   AS "Aktives Abo",
-  coalesce(a.gestoert, false) AS "Abo gestört",
+  coalesce(a.gestoert, false) AS "Abo stillgelegt",
   v.kunde_email IS NOT NULL  AS "Ticket versendet",
   coalesce(v.anzahl, 0)      AS "Versendete Tickets",
   v.zuletzt                  AS "Ausgestellt am"
@@ -213,8 +216,50 @@ def liste(tickets, monat, versendet=None, formatiert=False):
         raise SystemExit(f"Abfrage fehlgeschlagen: {text[:250]}")
     return text
 
+# --- Klärliste der gestörten Abos ---------------------------------------
+# Die Quelle markiert jedes stillgelegte Abo als gestört. rpt.abo_stoerung
+# ordnet jedes über den Fahrgast ein (siehe 13_app_reports.sql). Enthält
+# Personendaten: nur in Metabase, auf keinem Board.
+KLAER = "Gestörte Abos – Klärliste"
+KLAER_SQL = """SELECT klaerung AS "Klärung", abo_code AS "Abo-Code", produkt AS "Produkt",
+       fahrgast AS "Fahrgast", geburtsdatum AS "Geburtsdatum Fahrgast",
+       kunde_email AS "E-Mail Konto", kontoinhaber AS "Kontoinhaber", konto_vorhanden AS "Konto vorhanden",
+       laeuft_seit AS "Läuft seit", letzte_abrechnung AS "Letzte Abrechnung", stillgelegt_am AS "Stillgelegt am",
+       ticket_im_monat AS "Ticket im Monat", ticket_vormonat AS "Ticket im Vormonat",
+       berechtigt_im_monat AS "Berechtigt im Monat", bestandsmonat AS "Bestandsmonat"
+FROM rpt.abo_stoerung
+ORDER BY klaerung_nr = 4 DESC, klaerung_nr, "E-Mail Konto", "Fahrgast\""""
+k_alt = next((c for c in call(f"/api/collection/{COLL}/items?models=card")["data"] if c["name"] == KLAER), None)
+k_karte = {"name": KLAER, "collection_id": COLL, "display": "table",
+           "description": "Jedes als gestört markierte (stillgelegte) Abo mit Klärung über den Fahrgast. "
+                          "Handlungsbedarf nur bei „offen“. Enthält Personendaten — nicht weitergeben, nicht einbetten.",
+           "dataset_query": {"type": "native", "database": db_id, "native": {"query": KLAER_SQL}},
+           "visualization_settings": {"column_settings": {
+               json.dumps(["name", n], separators=(",", ":")): DAT
+               for n in ("Läuft seit", "Letzte Abrechnung", "Stillgelegt am", "Bestandsmonat")}}}
+if k_alt:
+    call(f"/api/card/{k_alt['id']}", k_karte, m="PUT"); kid = k_alt["id"]
+else:
+    kid = call("/api/card", k_karte)["id"]
+
+def klaerliste(formatiert=False):
+    daten = {"format_rows": "true"} if formatiert else {}
+    r = urllib.request.Request(f"{BASE}/api/card/{kid}/query/csv", method="POST",
+        data=urllib.parse.urlencode(daten).encode(), headers={"X-Metabase-Session": tok})
+    with urllib.request.urlopen(r, timeout=600) as x:
+        text = x.read().decode("utf-8-sig")
+    if not text.startswith("Klärung,"):
+        raise SystemExit(f"Abfrage fehlgeschlagen: {text[:250]}")
+    return list(csv.reader(io.StringIO(text)))
+
 tickets = args.ticket or TICKETS
-if args.csv:
+if args.csv and args.stoerung:
+    zeilen = klaerliste(formatiert=True)
+    if args.stoerung == "offen":
+        zeilen = zeilen[:1] + [z for z in zeilen[1:] if z[0].startswith("offen")]
+    csv.writer(sys.stdout, lineterminator="\n").writerows(zeilen)
+    melden(f"  {len(zeilen) - 1} gestörte Abos ({args.stoerung})")
+elif args.csv:
     text = liste(tickets, args.monat, args.versendet, formatiert=True)
     sys.stdout.write(text)
     melden(f"  {len(list(csv.reader(io.StringIO(text)))) - 1} Personen "
@@ -224,3 +269,6 @@ else:
     melden(f"  {zaehlen()} Personen mit Ticket {' oder '.join(tickets)}")
     melden(f"  davon mit versendetem Ticket ({args.monat}): {zaehlen('ja')}, ohne: {zaehlen('nein')}")
     melden(f"  Öffnen: {BASE}/question/{cid}")
+    stand = {}
+    for z in klaerliste()[1:]: stand[z[0]] = stand.get(z[0], 0) + 1
+    melden(f"{KLAER} (ID {kid}): " + ", ".join(f"{n} {k}" for k, n in sorted(stand.items())))

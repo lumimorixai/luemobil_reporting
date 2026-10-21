@@ -61,6 +61,13 @@ für die Demo.
 Deterministisch über `md5()`: Dieselbe Original-E-Mail ergibt in allen Tabellen und beiden
 Datenbanken denselben Ersatzwert. Nur deshalb bleiben die Joins intakt.
 
+Fahrgast im Ticket und Person im Abo-Bestand werden über ihren **Namen** ersetzt
+(`anon_person`), nicht über die E-Mail. So bekommt dieselbe Person überall denselben
+Ersatznamen und dasselbe Geburtsdatum, und `rpt.abo_stoerung` funktioniert in der Demo wie
+in der Produktion. Bei 30 × 30 Ersatznamen fallen vereinzelt zwei Menschen auf denselben
+Namen mit demselben Geburtsdatum. Deshalb kann die Demo um einzelne Fälle von der Produktion
+abweichen (21.10.2026: 56 statt 55 erledigt, 32 statt 33 beendet, offen gleich).
+
 **Erhalten:** PLZ, Ort, Geburtsjahr, alle Beträge, Zeitstempel, Status, Produktbezüge, Plattform
 **Ersetzt:** Name, E-Mail, Telefon, Straße, Hausnummer, Tag/Monat der Geburt, Abo-Kundennummer
 **Gelöscht:** Passwörter, Sitzungsschlüssel, Lichtbild, Barcode, Ticketgeheimnis
@@ -144,7 +151,8 @@ Die Rechte der Ticket-API und von Metabase bleiben erhalten, 4.6 im Betriebshand
 | `rpt.bestellung`, `rpt.kunde_360`, `rpt.produkt` | Unterabfragen je Zeile über `postgres_fdw` | 6 s je Spalte, einzelne Kacheln brachen ab |
 | Kundenliste (`12_kundenliste.py`) | „versendet im Monat“ nach Kaufdatum | Oktober: rund 1.959 statt 4.914 Personen mit Ticket |
 
-**Neu:** `rpt.abo_ticket` (wer hat für welchen Monat ein Abo-Ticket), `rpt.berechtigte_person`,
+**Neu:** `rpt.abo_ticket` (wer hat für welchen Monat ein Abo-Ticket), `rpt.abo_fahrgast`
+(wer auf einem Abo-Ticket steht), `rpt.abo_stoerung` (gestörte Abos mit Klärung), `rpt.berechtigte_person`,
 `rpt.monatsbilanz`, `rpt.monatsstand` (Tabelle, tägliche Momentaufnahme),
 `rpt.abo_verlauf`, `rpt.abo_verlaengerung`, `rpt.bestellergebnis`, `rpt.erstattung`,
 `rpt.app_nutzung`, `rpt.datenstand`; `rpt.bestellposition` mit Gültigkeit, Gültigkeitsmonat,
@@ -155,6 +163,14 @@ Start- und Zielzone; `rpt.tagesreihe` mit Tickets je Kanal, PayOne und Erstattun
 **Elfte Falle — gekauft ist nicht gültig.** Das Abo-Ticket für Oktober wird am 27. September
 ausgestellt. Wer wissen will, wer im Oktober ein Ticket hat, fragt die Gültigkeit
 (`orders_products.custom1 → timeValidity`), nicht das Kaufdatum.
+
+**Dreizehnte Falle — gestört heißt stillgelegt.** Die Quelle setzt `problem = 1`, wenn sie
+ein Abo stilllegt, und benennt seinen Code um: `R-<Datum>-<Nr>-LUB#…`, damit der ursprüngliche
+Code für ein neues Abo frei wird. Einen Störungstext liefert sie nie. Von 95 „gestörten“ Abos
+(21.10.2026) waren 55 erledigt (Fahrgast hat ein Oktober-Ticket, 21 davon in einem anderen
+Konto), 33 zu Recht beendet (nicht mehr im Bestand) und **7 offen**. `rpt.abo_stoerung` ordnet
+jedes Abo über den **Fahrgast** ein (Name und Geburtsdatum aus dem Ticket), nicht über das
+Konto: Ein Konto kann Abos für mehrere Personen führen, etwa Eltern für ihre Kinder.
 
 **Zwölfte Falle — Fremdtabellen ohne Statistik.** Ohne `ANALYZE` kennt der Planer die
 Zeilenzahlen der Quelltabellen nicht und plant je nach Abfrage Schleifen über
@@ -225,6 +241,14 @@ rm /root/kundenliste.csv                                                        
 | `--versendet ja` / `nein` | nur mit oder ohne versendetes Ticket (weggelassen: alle) |
 | `--monat 2026-10` | Monat, in dem das Ticket gilt (weggelassen: aktueller Monat) |
 | `--ticket 9995` | nur dieses Ticket, mehrfach möglich (weggelassen: beide) |
+| `--stoerung` / `--stoerung alle` | statt der Kundenliste die **Klärliste der gestörten Abos**: nur offene Fälle bzw. alle mit Klärung |
+
+Die Klärliste („Gestörte Abos – Klärliste“ in Metabase) zeigt je Abo Fahrgast, Konto, Tag der
+Stilllegung, Ticket im Monat und Vormonat, Berechtigung und die Klärung. Offene Fälle stehen oben.
+
+```bash
+docker compose run --rm -T kundenliste --csv --stoerung > /root/gestoerte_abos_offen.csv
+```
 
 Die Optionen gelten auch für den Probelauf ohne `--csv`. In der Demo liegen die Daten
 im September: `python3 metabase-setup/12_kundenliste.py --monat 2026-09`.

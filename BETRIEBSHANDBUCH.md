@@ -516,8 +516,13 @@ als CSV — Einzelheiten in `metabase-setup/README.md`, Abschnitt „Kundenliste
 ```bash
 docker compose run --rm kundenliste                  # einmalig: Frage in Metabase anlegen
 docker compose run --rm -T kundenliste --csv --versendet ja > /root/kundenliste.csv
-# abholen mit scp, danach auf dem Server löschen — die Datei enthält Personendaten
+docker compose run --rm -T kundenliste --csv --stoerung > /root/gestoerte_abos_offen.csv   # Klärliste
+# abholen mit scp, danach auf dem Server löschen — die Dateien enthalten Personendaten
 ```
+
+**Gestörte Abos:** Die Quelle markiert jedes *stillgelegte* Abo als gestört. Handlungsbedarf
+besteht nur bei den offenen Fällen (Kachel „Gestörte Abos, offen“, Arbeitsliste). Die
+Einordnung erklärt Board 6 und `metabase-setup/README.md` (dreizehnte Falle).
 
 **Reports einspielen** — Sichten, Kundenliste und alle sieben Dashboards kommen aus dem
 Repository, nicht aus Handarbeit in der Oberfläche. Nach jedem `git pull`, der
@@ -659,6 +664,7 @@ Wichtig: Dieselbe Metabase-Version wie zum Zeitpunkt der Sicherung verwenden, un
 | `/var/backups/luemobil` | Abfrageprotokoll | 30 Tage | nur `postgres` (700) |
 | `metabase_app` | Metabase-Konten (Name, E-Mail), keine Kundendaten | dauerhaft | nur `metabase_app` |
 | Metabase-Frage „Kundenliste nach Ticket (9995 / 9999)" | E-Mail, Name, Abo-Kundennummer, PLZ, Ort aller Abo-Berechtigten, Versandstatus des Tickets; als CSV ladbar | jeweils aktueller Stand; heruntergeladene CSV-Dateien liegen beim Bearbeiter | Metabase-Konten mit Zugriff auf die Sammlung „LüMobil Vertrieb", nicht eingebettet |
+| Metabase-Frage „Gestörte Abos – Klärliste" | Fahrgast (Name, Geburtsdatum), E-Mail und Name des Kontoinhabers je stillgelegtem Abo; als CSV ladbar | jeweils aktueller Stand; CSV-Dateien beim Bearbeiter | wie die Kundenliste, nicht eingebettet |
 | Dashboard „4 — Betrieb und Störungen" | Tabelle mit einzelnen Bestellungen (Bestellnummer) | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
 | Dashboard „3 — Einzeltickets und PayOne" | Tabelle „Erstattungen im Einzelnen“ mit Bestellnummer und Betrag | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
 | `rpt.monatsstand` | keiner: nur Summen je Segment und Tag | dauerhaft | wie alle Sichten in `rpt` |

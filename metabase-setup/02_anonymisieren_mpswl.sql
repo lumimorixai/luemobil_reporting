@@ -6,10 +6,12 @@
 -- --- Abo-Berechtigungen ----------------------------------------------
 -- Die E-Mail wird mit derselben Funktion ersetzt wie in customers.
 -- Dadurch bleibt der Abgleich Bestand <-> App-Konto exakt erhalten.
+-- Name und Geburtsdatum wie beim Fahrgast im Ticket (anon_person, siehe 01),
+-- damit der Abgleich Ticket <-> Bestand über die Person erhalten bleibt.
 UPDATE public.abo_berechtigungen_luebeck SET
-  first_name     = anon_vorname(email),
-  last_name      = anon_nachname(email),
-  birthday       = anon_gebdat(birthday::timestamp, email)::date,
+  first_name     = anon_vorname(anon_person(first_name, last_name)),
+  last_name      = anon_nachname(anon_person(first_name, last_name)),
+  birthday       = anon_gebdat(birthday::timestamp, anon_person(first_name, last_name))::date,
   phone          = anon_telefon(phone),
   street         = anon_strasse(street),
   street_number  = anon_hausnr(street_number),
@@ -22,11 +24,16 @@ UPDATE public.abo_berechtigungen_luebeck SET
   email          = anon_email(email);
 
 -- --- Abo-Codes -------------------------------------------------------
--- Format LUB#<OVS-Kundennummer>#<lfd>. Mittelteil ersetzen.
+-- Format LUB#<Nummer>#<lfd>, stillgelegte Abos R-<Datum>-<Nr>-LUB#<Nummer>#<lfd>.
+-- Die Nummer ersetzen, Präfix und laufende Nummer behalten. custom3 trägt
+-- die Kundennummer des Bestands: gleich ersetzen wie customer_number oben.
 UPDATE public.kk_subscription SET
-  subscription_code = 'LUB#' || anon_kundennr(split_part(subscription_code, '#', 2))
-                      || '#' || split_part(subscription_code, '#', 3)
-WHERE subscription_code LIKE 'LUB#%';
+  subscription_code = substring(subscription_code FROM '^(.*?)LUB#') || 'LUB#'
+                      || anon_kundennr(split_part(substring(subscription_code FROM 'LUB#.*$'), '#', 2))
+                      || '#' || split_part(substring(subscription_code FROM 'LUB#.*$'), '#', 3)
+WHERE subscription_code LIKE '%LUB#%';
+UPDATE public.kk_subscription SET custom3 = anon_kundennr(custom3)
+WHERE coalesce(custom3, '') <> '';
 
 -- --- Kundentags mit personenbezogenem Inhalt -------------------------
 UPDATE public.kk_customers_to_tag SET tag_value = anon_email(tag_value)

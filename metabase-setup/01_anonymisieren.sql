@@ -113,14 +113,21 @@ WHERE coalesce(entry_email_address, '') <> '';
 -- Fahrgäste je Ticket in orders_products.custom1 (persons[]): Name ersetzen,
 -- beim Geburtsdatum bleibt das Jahr. Gültigkeit, Relation, Ticketnummer
 -- bleiben unverändert, die Reports brauchen sie.
+-- Schlüssel ist der Name der Person, nicht die E-Mail: Derselbe Fahrgast
+-- bekommt so im Ticket und im Abo-Bestand (02_anonymisieren_mpswl.sql)
+-- denselben Ersatznamen und dasselbe Geburtsdatum. rpt.abo_stoerung ordnet
+-- über Name und Geburtsdatum zu.
+CREATE OR REPLACE FUNCTION anon_person(vorname text, nachname text) RETURNS text AS $$
+  SELECT lower(btrim(coalesce(vorname, ''))) || '|' || lower(btrim(coalesce(nachname, '')));
+$$ LANGUAGE sql IMMUTABLE;
 CREATE OR REPLACE FUNCTION anon_fahrgast(p jsonb) RETURNS jsonb AS $$
   SELECT p
     || CASE WHEN p ? 'firstName' THEN jsonb_build_object('firstName',
-         anon_vorname(coalesce(p->>'firstName','') || coalesce(p->>'lastName',''))) ELSE '{}' END
+         anon_vorname(anon_person(p->>'firstName', p->>'lastName'))) ELSE '{}' END
     || CASE WHEN p ? 'lastName' THEN jsonb_build_object('lastName',
-         anon_nachname(coalesce(p->>'firstName','') || coalesce(p->>'lastName',''))) ELSE '{}' END
+         anon_nachname(anon_person(p->>'firstName', p->>'lastName'))) ELSE '{}' END
     || CASE WHEN coalesce(p->>'dateOfBirth','') ~ '^\d{4}-\d{2}-\d{2}' THEN jsonb_build_object('dateOfBirth',
-         to_char(anon_gebdat(left(p->>'dateOfBirth', 10)::timestamp, coalesce(p->>'firstName','') || coalesce(p->>'lastName','')), 'YYYY-MM-DD'))
+         to_char(anon_gebdat(left(p->>'dateOfBirth', 10)::timestamp, anon_person(p->>'firstName', p->>'lastName')), 'YYYY-MM-DD'))
        ELSE '{}' END;
 $$ LANGUAGE sql IMMUTABLE;
 UPDATE public.orders_products SET custom1 = jsonb_set(custom1::jsonb, '{persons}',
