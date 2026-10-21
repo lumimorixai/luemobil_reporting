@@ -104,3 +104,37 @@ UPDATE public.orders SET
 
 -- --- Sitzungsschlüssel entwerten -------------------------------------
 UPDATE public.sessions SET sesskey = 'demo-' || md5(sesskey);
+
+-- --- Ab Oktober 2026 befüllt -----------------------------------------
+-- E-Mail im Adressbuch (sonst leer, einzelne Einträge tragen sie)
+UPDATE public.address_book SET entry_email_address = anon_email(entry_email_address)
+WHERE coalesce(entry_email_address, '') <> '';
+
+-- Fahrgäste je Ticket in orders_products.custom1 (persons[]): Name ersetzen,
+-- beim Geburtsdatum bleibt das Jahr. Gültigkeit, Relation, Ticketnummer
+-- bleiben unverändert, die Reports brauchen sie.
+CREATE OR REPLACE FUNCTION anon_fahrgast(p jsonb) RETURNS jsonb AS $$
+  SELECT p
+    || CASE WHEN p ? 'firstName' THEN jsonb_build_object('firstName',
+         anon_vorname(coalesce(p->>'firstName','') || coalesce(p->>'lastName',''))) ELSE '{}' END
+    || CASE WHEN p ? 'lastName' THEN jsonb_build_object('lastName',
+         anon_nachname(coalesce(p->>'firstName','') || coalesce(p->>'lastName',''))) ELSE '{}' END
+    || CASE WHEN coalesce(p->>'dateOfBirth','') ~ '^\d{4}-\d{2}-\d{2}' THEN jsonb_build_object('dateOfBirth',
+         to_char(anon_gebdat(left(p->>'dateOfBirth', 10)::timestamp, coalesce(p->>'firstName','') || coalesce(p->>'lastName','')), 'YYYY-MM-DD'))
+       ELSE '{}' END;
+$$ LANGUAGE sql IMMUTABLE;
+UPDATE public.orders_products SET custom1 = jsonb_set(custom1::jsonb, '{persons}',
+    (SELECT coalesce(jsonb_agg(anon_fahrgast(p)), '[]') FROM jsonb_array_elements(custom1::jsonb->'persons') p))::text
+WHERE custom1 LIKE '{%' AND jsonb_typeof(custom1::jsonb->'persons') = 'array';
+
+-- Gespeicherte Karten (nur maskiert vorhanden): Inhaber ersetzen, Rest leeren
+UPDATE public.kk_credit_card SET
+  ccowner = anon_vorname(ccowner) || ' ' || anon_nachname(ccowner),
+  ccnumber = '****', cctoken = NULL, custom1 = NULL, custom2 = NULL, custom3 = NULL,
+  custom4 = NULL, custom5 = NULL;
+
+-- Merklisten tragen Namen und Ort des Kunden
+UPDATE public.kk_wishlist SET
+  customers_firstname = anon_vorname(customers_firstname || customers_lastname),
+  customers_lastname = anon_nachname(customers_firstname || customers_lastname),
+  customers1_firstname = NULL, customers1_lastname = NULL;

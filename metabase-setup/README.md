@@ -46,6 +46,11 @@ Der Vertrieb kann sich frei bedienen, ohne die Fallen im Quellschema kennen zu m
 | `03_reporting_views.sql` | FDW-Einrichtung und die neun Auswertungssichten |
 | `04_kennzahlen.sql` | Eindeutige Zählebenen, Trichter, Arbeitslisten |
 | `05_metabase_einrichten.py` | Admin-Konto, Datenbankverbindung, Metadaten, 19 Fragen, 4 Dashboards |
+| `06`–`11` | Nachträge, Korrekturen und Gestaltung (Stand September 2026) |
+| `12_kundenliste.py` | Kundenliste der Abo-Berechtigten, siehe unten |
+| `13_app_reports.sql` | **Livebetrieb ab Oktober 2026:** korrigierte und neue Sichten, siehe unten |
+| `14_dashboards.py` | **Livebetrieb:** alle sieben Boards, korrigierte und neue Fragen |
+| `reports_einspielen.sh` | 13, 12 und 14 in dieser Reihenfolge — auf dem Server `docker compose run --rm reports` |
 
 Alle Skripte sind **idempotent** und laufen gegen die echte Produktivdatenbank genauso —
 mit zwei Ausnahmen: 01 und 02 dürfen dort **niemals** ausgeführt werden, die sind nur
@@ -102,29 +107,76 @@ Wer den Produktmix aus der Plattform-Datenbank zieht, bekommt eine einzige
 Sammelposition. `rpt.bestellposition` holt die Positionen deshalb über
 `externalOrderReference` aus dem Shop.
 
-## Die vier Dashboards
+## Die sieben Dashboards
 
-Deckungsgleich mit dem Klickdummy, je mit erläuternden Textkacheln.
+Seit Oktober 2026 (`14_dashboards.py`). Jedes Board zeigt oben rechts den **Datenstand**
+(letzte Bestellung im Dump). Die Texte enthalten keine festen Zahlen mehr. Alle Boards sind
+für die Einbettung freigegeben, keines zeigt E-Mail-Adressen oder Namen.
 
-| Board | Kennzahlen | Inhalt |
+| Board | Inhalt |
+|---|---|
+| **1 — Überblick** | Umsatz, Verkäufe, Ø Bon, Käufer, Konten, Bestellungen und Umsatz je Tag, **Tickets je Tag nach Kanal**, Kaufzeitpunkt, Produktmix, Kanäle |
+| **2 — Abo-Bestand** | Berechtigungen, Aktivierungsquote, offenes Potenzial, aktive Abos, Trichter, Segmente, Altersprofil, Arbeitslisten, PLZ-Tabelle |
+| **3 — Einzeltickets und PayOne** | PayOne-Bestellungen, Erfolgsquote (gesamt und 7 Tage), Umsatz ÖPNV und Fähre, Verlauf je Tag, Ausgang (abgelehnt, abgebrochen, Aufräumjob, erstattet), Produkte, **Relationen**, Tageszeit, Plattform, Erstattungen; darunter der Tarifkatalog |
+| **4 — Betrieb und Störungen** | Erfolgsquote, Abbrüche, Durchlaufzeit, Bestellstrecke, Abbrüche nach Ausgang, Plattform, Arbeitslisten (jetzt 12 Listen), Tarifausnahmen |
+| **5 — Monatsbilanz Abo** (neu) | Berechtigte → App-Konto → aktives Abo → **gültiges Ticket im Monat**, je Segment, verlängert/neu je Monat, Kundenbindung, nach Alter und PLZ, täglicher Verlauf |
+| **6 — Abo-Verlängerung** (neu) | Nächster Abrechnungstag, fällige Abos, Folgemonat schon ausgestellt, Lauf je Ausstellungstag, Kundenbindung, gestörte Abos |
+| **7 — App-Nutzung** (neu) | Konten, neue Konten (7/30 Tage), Käufer in 30 Tagen, Einwilligungen je Kontaktweg, Bestellungen je Konto, Wochentag, Plattform, Registrierungsmonat |
+
+Geprüft mit den Daten vom 21.10.2026: alle Kacheln liefern Daten, keine braucht mehr als
+2,2 Sekunden (alle zusammen 35 Sekunden).
+
+**Logins** wertet kein Board aus: `customers_info_date_last_logon` ist in der Quelle bei
+7.506 von 7.529 Konten leer.
+
+## Livebetrieb ab Oktober 2026: `13_app_reports.sql`
+
+Ändert vorhandene Sichten nur mit `CREATE OR REPLACE` und hängt neue Spalten hinten an.
+Die Rechte der Ticket-API und von Metabase bleiben erhalten, 4.6 im Betriebshandbuch muss
+**nicht** erneut laufen.
+
+**Korrigiert:**
+
+| Sicht | Fehler | Folge vorher |
 |---|---|---|
-| **1 — Überblick** | 11 | Umsatz, Verkäufe, Ø Bon, Käufer, Konten, Kaufquote, Tagesverlauf, Kaufzeitpunkt, Produktmix, Kanäle |
-| **2 — Abo-Bestand** | 10 | Berechtigungen, Aktivierungsquote, offenes Potenzial, Trichter, Segmente, Altersprofil, PLZ-Tabelle |
-| **3 — Einzeltickets über PayOne** | 11 | Leerzustand mit Feldbindung, Tarifkatalog, 93 Preisstufen, 712 Preispunkte, Gültigkeitsregeln, Preisspannen |
-| **4 — Betrieb und Störungen** | 10 | Erfolgsquote, Durchlaufzeit, Bestellstrecke, Abbruchursachen, Plattform, Arbeitslisten, Tarifausnahmen |
+| `rpt.bestellposition` | Verknüpfung über die SKU; seit 7.10. gibt es jede Einzel- und Fähr-SKU zwei- bis dreimal | 8.785 statt 8.629 Positionen; Einzeltickets doppelt gezählt, auch in der **Ticket-API** des Hilfecenters |
+| `rpt.produkt` | kannte nur die Kategorien 1–3, nicht die neuen Unterkategorien | Fähre als Einzelticket, 54 Tickets „unbekannt“ |
+| `rpt.bestellung`, `rpt.kunde_360`, `rpt.produkt` | Unterabfragen je Zeile über `postgres_fdw` | 6 s je Spalte, einzelne Kacheln brachen ab |
+| Kundenliste (`12_kundenliste.py`) | „versendet im Monat“ nach Kaufdatum | Oktober: rund 1.959 statt 4.914 Personen mit Ticket |
 
-Geprüft: 42 von 42 Kacheln liefern Daten.
+**Neu:** `rpt.abo_ticket` (wer hat für welchen Monat ein Abo-Ticket), `rpt.berechtigte_person`,
+`rpt.monatsbilanz`, `rpt.monatsstand` (Tabelle, tägliche Momentaufnahme),
+`rpt.abo_verlauf`, `rpt.abo_verlaengerung`, `rpt.bestellergebnis`, `rpt.erstattung`,
+`rpt.app_nutzung`, `rpt.datenstand`; `rpt.bestellposition` mit Gültigkeit, Gültigkeitsmonat,
+Start- und Zielzone; `rpt.tagesreihe` mit Tickets je Kanal, PayOne und Erstattungen.
+
+**Zehnte Falle — eine SKU ist kein Produkt.** Verknüpft wird über `products_id`.
+
+**Elfte Falle — gekauft ist nicht gültig.** Das Abo-Ticket für Oktober wird am 27. September
+ausgestellt. Wer wissen will, wer im Oktober ein Ticket hat, fragt die Gültigkeit
+(`orders_products.custom1 → timeValidity`), nicht das Kaufdatum.
+
+**Zwölfte Falle — Fremdtabellen ohne Statistik.** Ohne `ANALYZE` kennt der Planer die
+Zeilenzahlen der Quelltabellen nicht und plant je nach Abfrage Schleifen über
+`postgres_fdw`: Dieselbe Sicht brauchte Minuten statt einer halben Sekunde. Das Skript und
+der nächtliche Import frischen die Statistik deshalb jedes Mal auf.
+
+**Monatsverlauf:** Der Abo-Bestand wird jeden Monat vollständig ersetzt. Damit der Verlauf
+erhalten bleibt, schreibt der Import nach jedem Lauf eine Zeile je Segment nach
+`rpt.monatsstand` (nur Zahlen). Der Verlauf beginnt mit der Einrichtung.
 
 ## Abhängigkeiten zwischen den Views
 
-`rpt.bestellung` → `rpt.bestellposition`, `rpt.tagesreihe`
+`rpt.bestellung` → `rpt.bestellposition`, `rpt.tagesreihe`, `rpt.bestellergebnis`
+`rpt.bestellposition` → `rpt.abo_ticket` → `rpt.berechtigte_person` → `rpt.monatsbilanz` → `rpt.monatsstand`
 `rpt.kunde_360` → `rpt.tagesreihe`, `rpt.trichter`, `rpt.arbeitsliste`
 `rpt.produkt` → `rpt.bestellposition`
 `rpt.abo_berechtigung` → `rpt.aktivierung_plz`, `rpt.aktivierung_segment`, `rpt.trichter`
 
 Ein `DROP VIEW ... CASCADE` auf eine der linken Views reisst die rechten mit.
-`08_korrekturen.sql` legt sie deshalb am Ende alle wieder an — die Datei ist
-nach jeder Änderung an `kunde_360`, `bestellung` oder `produkt` erneut auszuführen.
+Seit `13_app_reports.sql` gilt deshalb: Sichten nur noch mit `CREATE OR REPLACE` ändern.
+Wer doch einmal 03–08 erneut einspielt, muss danach `13_app_reports.sql` und 4.6 im
+Betriebshandbuch wiederholen.
 
 
 ## Kundenliste nach Ticket
@@ -137,11 +189,14 @@ Monat ein Ticket versendet wurde, wie viele und wann zuletzt.
 | Filter | Vorbelegung |
 |---|---|
 | Ticket | 9995 und 9999 |
-| Versendet im Monat | aktueller Monat |
+| Ticket gültig im Monat | aktueller Monat |
 | Ticket versendet | leer = alle; `ja` oder `nein` |
 
-**Versendet** heißt: eine Bestellung im Status 3 „Versendet“ oder 47 „Versendet und
-ausgecheckt“, gekauft im gewählten Monat. Berechtigung und Bestellung werden über die
+**Versendet** heißt: ein ausgestelltes Abo-Ticket (Status 3 „Versendet“), das **im
+gewählten Monat gilt**. Das Kaufdatum zählt nicht: Das Ticket für Oktober wird am
+27. September ausgestellt (bis Oktober 2026 zählte die Liste nach Kaufdatum und zeigte
+deshalb für Oktober nur etwa 1.959 statt 4.914 Personen mit Ticket). Dazu die Spalten
+„Aktives Abo“ und „Abo gestört“. Berechtigung und Bestellung werden über die
 normalisierte E-Mail verbunden, denn `order_number` ist im Bestand leer. Wer in der App
 mit einer anderen Adresse bestellt, erscheint deshalb als „nicht versendet“.
 
@@ -168,7 +223,7 @@ rm /root/kundenliste.csv                                                        
 | Option | Bedeutung |
 |---|---|
 | `--versendet ja` / `nein` | nur mit oder ohne versendetes Ticket (weggelassen: alle) |
-| `--monat 2026-10` | Versandmonat (weggelassen: aktueller Monat) |
+| `--monat 2026-10` | Monat, in dem das Ticket gilt (weggelassen: aktueller Monat) |
 | `--ticket 9995` | nur dieses Ticket, mehrfach möglich (weggelassen: beide) |
 
 Die Optionen gelten auch für den Probelauf ohne `--csv`. In der Demo liegen die Daten

@@ -2,8 +2,11 @@
 """Kundenliste der Abo-Berechtigten nach Ticket (Bestandssegment 9995 / 9999).
 
 Legt in der Sammlung "LüMobil Vertrieb" eine Frage an, die je Person eine
-Zeile liefert: E-Mail, Name, Kundennummer, Ticket, PLZ, Gültigkeit, App-Konto
-und ob im gewählten Monat ein Ticket versendet wurde.
+Zeile liefert: E-Mail, Name, Kundennummer, Ticket, PLZ, Gültigkeit, App-Konto,
+Abo-Status und ob für den gewählten Monat ein Abo-Ticket ausgestellt
+(versendet) wurde. Maßgeblich ist die Gültigkeit des Tickets, nicht das
+Kaufdatum: Das Ticket für Oktober wird am 27. September ausgestellt.
+Setzt 13_app_reports.sql voraus (rpt.bestellposition.gueltigkeitsmonat).
 Filter oben: Ticket (vorbelegt: beide), Monat (vorbelegt: aktueller),
 Ticket versendet ja/nein (leer: alle). Unten lädt man die Liste als CSV.
 
@@ -22,7 +25,7 @@ Hilfecenter, sondern ist nur in der Metabase-Oberfläche erreichbar.
 
 Idempotent: Gibt es die Frage schon, wird sie auf diesen Stand gebracht.
 """
-import argparse, csv, io, json, os, re, sys, urllib.error, urllib.parse, urllib.request, uuid
+import argparse, csv, io, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request, uuid
 
 BASE = os.environ.get("MB_URL", "http://localhost:3030").rstrip("/")
 ANMELDUNG = {"username": os.environ.get("MB_EMAIL", "demo@luemobil.local"),
@@ -38,7 +41,7 @@ def monat_pruefen(w):
 ap = argparse.ArgumentParser(description="Kundenliste der Abo-Berechtigten nach Ticket")
 ap.add_argument("--csv", action="store_true", help="Liste als CSV auf die Standardausgabe")
 ap.add_argument("--monat", default="thismonth", type=monat_pruefen,
-                help="Versandmonat JJJJ-MM (Standard: aktueller Monat)")
+                help="Monat, in dem das Ticket gilt, JJJJ-MM (Standard: aktueller Monat)")
 ap.add_argument("--versendet", choices=["ja", "nein"], help="nur mit / ohne versendetes Ticket")
 ap.add_argument("--ticket", action="append", choices=TICKETS,
                 help="nur dieses Ticket (mehrfach möglich, Standard: beide)")
@@ -65,17 +68,29 @@ COLL = next(c["id"] for c in call("/api/collection") if c.get("name") == "LüMob
 # Feldfilter: Metabase setzt die Bedingung selbst ein und bietet beim Ticket
 # die vorhandenen Werte, beim Monat die Datumsauswahl an.
 def feld(tabelle, spalte):
-    t = next(t for t in call("/api/table") if t["schema"] == "rpt" and t["name"] == tabelle)
-    return next(f["id"] for f in call(f"/api/table/{t['id']}/query_metadata")["fields"]
-                if f["name"] == spalte)
-FELD_TICKET = feld("abo_berechtigung", "bestandssegment")
-FELD_KAUFTAG = feld("bestellung", "kauftag")
+    t = next((t for t in call("/api/table") if t["schema"] == "rpt" and t["name"] == tabelle), None)
+    if not t: return None
+    return next((f["id"] for f in call(f"/api/table/{t['id']}/query_metadata")["fields"]
+                 if f["name"] == spalte), None)
+def feld_abwarten(tabelle, spalte):
+    """Neue Spalten kennt Metabase erst nach einem Schema-Abgleich."""
+    fid = feld(tabelle, spalte)
+    if fid: return fid
+    melden(f"  Metabase gleicht das Schema ab (neue Spalte {tabelle}.{spalte}) ...")
+    call(f"/api/database/{db_id}/sync_schema", {})
+    for _ in range(60):
+        time.sleep(5)
+        fid = feld(tabelle, spalte)
+        if fid: return fid
+    raise SystemExit(f"Metabase kennt {tabelle}.{spalte} nicht. Ist 13_app_reports.sql eingespielt?")
+FELD_TICKET = feld_abwarten("abo_berechtigung", "bestandssegment")
+FELD_MONAT = feld_abwarten("bestellposition", "gueltigkeitsmonat")
 call(f"/api/field/{FELD_TICKET}", {"display_name": "Ticket", "has_field_values": "list"}, m="PUT")
 
 # Je Person eine Zeile (Personenebene wie überall: normalisierte E-Mail).
 # Wer beide Tickets hat, erscheint einmal mit "9995, 9999".
-# Versendet = Bestellung im Status 3 "Versendet" oder 47 "Versendet und
-# ausgecheckt" im gewählten Monat. Die Berechtigung kennt keine Bestellnummer
+# Versendet = ausgestelltes Abo-Ticket (Status 3 "Versendet"), das im
+# gewählten Monat gilt. Die Berechtigung kennt keine Bestellnummer
 # (order_number ist leer), die Zuordnung läuft daher über die E-Mail.
 # Feldfilter brauchen den vollen Tabellennamen — kein Alias im FROM.
 SQL = """WITH liste AS (
@@ -91,9 +106,12 @@ SQL = """WITH liste AS (
   GROUP BY kunde_email
 ), versand AS (
   SELECT kunde_email, count(*) AS anzahl, max(gekauft_am) AS zuletzt
-  FROM rpt.bestellung
-  WHERE status_id IN (3, 47) AND {{monat}}
+  FROM rpt.bestellposition
+  WHERE vertriebskanal = 'Abo' AND erfolgreich AND {{monat}}
   GROUP BY kunde_email
+), abo AS (
+  SELECT kunde_email, bool_or(aktiv) AS aktiv, bool_or(stoerung) AS gestoert
+  FROM rpt.abo WHERE kunde_email IS NOT NULL GROUP BY kunde_email
 )
 SELECT
   l.kunde_email              AS "E-Mail",
@@ -106,11 +124,14 @@ SELECT
   l.gueltig_ab               AS "Gültig ab",
   l.gueltig_bis              AS "Gültig bis",
   l.app_konto                AS "App-Konto",
+  coalesce(a.aktiv, false)   AS "Aktives Abo",
+  coalesce(a.gestoert, false) AS "Abo gestört",
   v.kunde_email IS NOT NULL  AS "Ticket versendet",
   coalesce(v.anzahl, 0)      AS "Versendete Tickets",
-  v.zuletzt                  AS "Zuletzt versendet"
+  v.zuletzt                  AS "Ausgestellt am"
 FROM liste l
 LEFT JOIN versand v ON v.kunde_email = l.kunde_email
+LEFT JOIN abo a     ON a.kunde_email = l.kunde_email
 WHERE true
 [[AND (v.kunde_email IS NOT NULL) = ({{versendet}} = 'ja')]]
 ORDER BY "Name", "E-Mail\""""
@@ -120,14 +141,16 @@ ORDER BY "Name", "E-Mail\""""
 vorhanden = next((c for c in call(f"/api/collection/{COLL}/items?models=card")["data"]
                   if c["name"] == NAME), None)
 alte_tags = {}
-if vorhanden:
-    alte_tags = call(f"/api/card/{vorhanden['id']}")["dataset_query"] \
-                .get("native", {}).get("template-tags", {})
+if vorhanden:  # Metabase ab 0.63 liefert die Abfrage in "stages" zurück
+    alt = call(f"/api/card/{vorhanden['id']}")["dataset_query"]
+    alte_tags = (alt.get("native") or (alt.get("stages") or [{}])[0]).get("template-tags", {}) or {}
+    if isinstance(alte_tags, list):  # neues Format: Liste statt Name -> Tag
+        alte_tags = {t["name"]: t for t in alte_tags}
 tid = lambda n: alte_tags.get(n, {}).get("id") or str(uuid.uuid4())
 
 FILTER = [  # Name, Anzeige, Art, Feld, Vorbelegung
     ("ticket", "Ticket", "string/=", FELD_TICKET, TICKETS),
-    ("monat", "Versendet im Monat", "date/all-options", FELD_KAUFTAG, "thismonth"),
+    ("monat", "Ticket gültig im Monat", "date/all-options", FELD_MONAT, "thismonth"),
     ("versendet", "Ticket versendet", "string/=", None, None),
 ]
 tags, parameter = {}, []
@@ -150,7 +173,8 @@ DAT = {"date_style": "D.M.YYYY"}
 karte = {
     "name": NAME,
     "description": "Alle Abo-Berechtigten mit Ticket 9995 und/oder 9999, eine Zeile je Person, "
-                   "dazu ob im gewählten Monat (vorbelegt: aktueller) ein Ticket versendet wurde. "
+                   "dazu ob für den gewählten Monat (vorbelegt: aktueller) ein Abo-Ticket ausgestellt "
+                   "wurde. Gezählt wird die Gültigkeit, nicht das Kaufdatum. "
                    "Oben filtern, unten rechts als CSV herunterladen. "
                    "Enthält Personendaten — nicht weitergeben, nicht einbetten.",
     "collection_id": COLL, "display": "table",
@@ -160,7 +184,7 @@ karte = {
     "visualization_settings": {"column_settings": {
         json.dumps(["name", n], separators=(",", ":")): o for n, o in
         [("Gültig ab", DAT), ("Gültig bis", DAT),
-         ("Zuletzt versendet", {**DAT, "time_enabled": "minutes", "time_style": "HH:mm"})]}},
+         ("Ausgestellt am", {**DAT, "time_enabled": "minutes", "time_style": "HH:mm"})]}},
 }
 if vorhanden:
     call(f"/api/card/{vorhanden['id']}", karte, m="PUT"); cid = vorhanden["id"]

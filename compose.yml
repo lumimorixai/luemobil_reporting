@@ -8,6 +8,7 @@
 #   docker compose run --rm import       Dumps einspielen (sonst per Timer)
 #   docker compose run --rm sicherung    lue_reporting + metabase_app sichern
 #   docker compose run --rm kundenliste  Kundenliste anlegen, mit --csv ausgeben
+#   docker compose run --rm reports      Sichten, Kundenliste und Dashboards einspielen
 #
 # Konfiguration: .env neben dieser Datei (Vorlage: server/reporting.env.beispiel)
 # Erreichbarkeit:
@@ -113,6 +114,26 @@ services:
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       - ./server/metabase_nach_umzug.py:/opt/luemobil/metabase_nach_umzug.py:ro
+    networks: [hilfecenter]
+
+  # --- Reports einspielen (metabase-setup/reports_einspielen.sh) ---------
+  # Sichten (13_app_reports.sql), Kundenliste, Dashboards. Nach jedem
+  # git pull, der metabase-setup/ ändert:
+  #   docker compose build import && docker compose run --rm reports
+  reports:
+    build: ./import
+    profiles: ['werkzeuge']
+    entrypoint: ['bash', '/opt/luemobil/metabase-setup/reports_einspielen.sh']
+    environment:
+      PGHOST: ${PG_HOST:-postgres}
+      PGUSER: ${PG_USER:-luemobil}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
+      MB_URL: http://metabase:3000
+      MB_EMAIL: ${MB_ADMIN_EMAIL:?MB_ADMIN_EMAIL fehlt in .env}
+      MB_PASSWORT: ${MB_ADMIN_PASSWORT:?MB_ADMIN_PASSWORT fehlt in .env}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - ./metabase-setup:/opt/luemobil/metabase-setup:ro
     networks: [hilfecenter]
 
   # --- Kundenliste der Abo-Berechtigten (metabase-setup/12_kundenliste.py)

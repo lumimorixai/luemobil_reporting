@@ -398,7 +398,7 @@ systemctl list-timers 'luemobil-*'
 ```bash
 cd /opt/luemobil_reporting
 
-# Import: 45 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
+# Import: 47 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
 # (nimmt die Dumps auch als .zip oder .gz, z. B. die zuletzt archivierten)
 docker compose run --rm --entrypoint /opt/luemobil/test_import.sh import \
   /srv/luemobil/archiv/<mpswl-dump>.zip /srv/luemobil/archiv/<swl-dump>.zip
@@ -429,6 +429,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://reporting.swl-innovation.de/
 6. **Austausch** per Umbenennen: aktuell → `_alt`, `_neu` → aktuell. Dauert unter einer Sekunde. Offene Verbindungen zu den Quelldatenbanken werden getrennt, `lue_reporting` verbindet sich beim nächsten Zugriff automatisch neu (getestet).
 7. **Rauchtest:** `SELECT count(*) FROM rpt.bestellposition` muss > 0 liefern. Wenn nicht, wird sofort zurückgetauscht.
 8. **Abschluss:** Dumps ins Archiv, Status nach `/var/lib/luemobil-import/letzter_import.json`, Dumps älter als 7 Tage löschen.
+9. **Reporting nachziehen:** Statistik der Fremdtabellen auffrischen und die Momentaufnahme der Monatsbilanz nach `rpt.monatsstand` schreiben. Schlägt das fehl, gibt es eine Warnung, der Import gilt trotzdem.
 
 **Grundsatz:** Scheitert irgendein Schritt, bleiben die Daten von gestern aktiv. Die Dumps
 wandern nach `fehler/`, und es kommt eine Mail.
@@ -513,9 +514,25 @@ docker compose run --rm -T kundenliste --csv --versendet ja > /root/kundenliste.
 # abholen mit scp, danach auf dem Server löschen — die Datei enthält Personendaten
 ```
 
-Dashboards ändert man in der Oberfläche über den Tunnel. Neue Dashboards, die das Hilfecenter
-zeigen soll, brauchen *Teilen → Einbetten → Statische Einbettung → Veröffentlichen*, und das
-Hilfecenter braucht die neue Dashboard-ID.
+**Reports einspielen** — Sichten, Kundenliste und alle sieben Dashboards kommen aus dem
+Repository, nicht aus Handarbeit in der Oberfläche. Nach jedem `git pull`, der
+`metabase-setup/` ändert:
+
+```bash
+cd /opt/luemobil_reporting && git pull
+docker compose build import                          # nur nötig, wenn import/Dockerfile geändert ist
+docker compose run --rm reports
+```
+
+Erwartet: `1/3 … ok: … Ticketpositionen`, dann die Kundenliste, dann `Fertig. Board-IDs: …`
+ohne `FEHLER`-Zeilen. Dauert gut eine Minute. Bricht Schritt 1 mit `lock timeout` ab, lief
+gerade eine Metabase-Abfrage: einfach noch einmal starten.
+
+Was in der Oberfläche von Hand an diesen sieben Boards geändert wird, überschreibt der
+nächste Lauf. Eigene Auswertungen deshalb in einer **eigenen Sammlung** anlegen.
+
+Neue Dashboards, die das Hilfecenter zeigen soll, brauchen die Einbettungsfreigabe (setzt
+`reports` für seine Boards selbst), und das Hilfecenter braucht die neue Dashboard-ID.
 
 ---
 
@@ -549,6 +566,9 @@ Hilfecenter braucht die neue Dashboard-ID.
 | `load-from-h2`: Zieldatenbank ist nicht leer | Metabase lief zwischendurch und hat sein Schema angelegt | `metabase_app` löschen und neu anlegen (4.8) |
 | Metabase startet nicht, Log: „Unable to connect to Metabase application database" | `metabase_app`-Zugang falsch | Werte in `/opt/luemobil_reporting/.env` prüfen, `docker compose up -d metabase` |
 | Metabase-Dashboards leer, Kacheln melden Fehler | Verbindung zu `lue_reporting` gestört oder Rechte nach Sichten-Neuanlage verloren | Im Tunnel *Admin → Datenbanken → LüMobil Reporting → Verbindung testen*; 4.8.1 erneut ausführen |
+| Dashboards sehr langsam, Kacheln brechen ab | Statistik der Fremdtabellen fehlt oder ist veraltet (der Import meldet dann `WARNUNG: Statistik …`) | `docker compose run --rm reports` frischt sie auf |
+| `reports`: `canceling statement due to lock timeout` | Eine Metabase-Abfrage hielt die Sichten fest | Noch einmal starten |
+| Board 5 „Verlauf der Monatsbilanz“ zeigt nur einen Punkt | Der Verlauf beginnt mit der Einrichtung, je Import kommt ein Punkt dazu | Nichts zu tun |
 | Dashboards zeigen alte Zahlen | Zwischenspeicher wieder eingeschaltet | Im Tunnel *Admin → Performance → Standardregel* auf „Kein Zwischenspeicher"; siehe 4.8 |
 | Eingebettetes Dashboard im Hilfecenter leer | Token, Freigabe, IP oder CSP — siehe Fehlerbilder in `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Dort Abschnitt 6 |
 | Caddy startet nicht: `open /var/log/caddy/…: permission denied` | Der Dienst darf dort nicht schreiben (systemd-Härtung), auch wenn das Verzeichnis ihm gehört | Im Block `output stderr` statt `output file` — dann steht alles im Journal |
@@ -632,6 +652,8 @@ Wichtig: Dieselbe Metabase-Version wie zum Zeitpunkt der Sicherung verwenden, un
 | `metabase_app` | Metabase-Konten (Name, E-Mail), keine Kundendaten | dauerhaft | nur `metabase_app` |
 | Metabase-Frage „Kundenliste nach Ticket (9995 / 9999)" | E-Mail, Name, Abo-Kundennummer, PLZ, Ort aller Abo-Berechtigten, Versandstatus des Tickets; als CSV ladbar | jeweils aktueller Stand; heruntergeladene CSV-Dateien liegen beim Bearbeiter | Metabase-Konten mit Zugriff auf die Sammlung „LüMobil Vertrieb", nicht eingebettet |
 | Dashboard „4 — Betrieb und Störungen" | Tabelle mit einzelnen Bestellungen (Bestellnummer) | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
+| Dashboard „3 — Einzeltickets und PayOne" | Tabelle „Erstattungen im Einzelnen“ mit Bestellnummer und Betrag | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
+| `rpt.monatsstand` | keiner: nur Summen je Segment und Tag | dauerhaft | wie alle Sichten in `rpt` |
 | Caddy-Log `reporting` | IP-Adresse, Token gekürzt, keine E-Mail | Log-Rotation von Caddy | root |
 | Container-Logs (`docker compose logs`) | IP-Adresse, keine E-Mail, keine Tokens | Docker-Log-Rotation | root |
 
@@ -693,6 +715,9 @@ Auftragsverarbeitung mit dem Hoster des virtuellen Servers.
 | `metabase-setup/EINBINDUNG_DASHBOARDS_HILFECENTER.md` | Anleitung fürs Hilfecenter zum Einbetten |
 | `metabase-setup/einbettung_pruefen.py` | Prüft die Einbettung, erzeugt eine Testseite |
 | `metabase-setup/12_kundenliste.py` | Metabase-Frage: Abo-Berechtigte 9995/9999 mit Versandstatus, CSV-Download (`docker compose run --rm kundenliste`) |
+| `metabase-setup/13_app_reports.sql` | Sichten für den Livebetrieb: Monatsbilanz, Abo-Verlängerung, PayOne, Erstattungen, App-Nutzung |
+| `metabase-setup/14_dashboards.py` | Alle sieben Dashboards und ihre Fragen |
+| `metabase-setup/reports_einspielen.sh` | 13, 12, 14 in dieser Reihenfolge (`docker compose run --rm reports`) |
 
 ---
 
@@ -1025,7 +1050,7 @@ cd /opt/luemobil_reporting/import
 sudo -u postgres ./test_import.sh \
   "$(ls -t /srv/luemobil/archiv/kk_mpswl-* | head -1)" \
   "$(ls -t /srv/luemobil/archiv/kk_swl-* | head -1)"
-# Erwartet: 45 bestanden, 0 fehlgeschlagen
+# Erwartet: 47 bestanden, 0 fehlgeschlagen
 ```
 
 Er prüft: Erstimport, doppelte Lieferung, Austausch bei offener Sitzung, abgeschnittener Dump,

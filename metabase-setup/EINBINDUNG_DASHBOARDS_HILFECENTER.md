@@ -28,10 +28,17 @@ Seite „Kennzahlen“ ─────────▶ 1. Ist die Person angemeld
 
 | ID | Dashboard | Inhalt | Personenbezug |
 |---:|---|---|---|
-| 6 | 1 — Überblick | Umsatz, Verkäufe, Ø Bon, Käufer, Konten, Tagesverlauf, Produktmix, Kanäle | nur Summen |
+| 6 | 1 — Überblick | Umsatz, Verkäufe, Ø Bon, Käufer, Konten, Tagesverlauf, Tickets je Kanal, Produktmix | nur Summen |
 | 7 | 2 — Abo-Bestand | Berechtigungen, Aktivierungsquote, Trichter, Segmente, Altersprofil, Aktivierung je PLZ | Summen, PLZ-Tabelle mit kleinen Fallzahlen |
-| 8 | 3 — Einzeltickets über PayOne | Tarifkatalog, Preisstufen, Preispunkte, Gültigkeitsregeln | keiner |
+| 8 | 3 — Einzeltickets und PayOne | PayOne-Erfolgsquote, Abbruchgründe, Umsatz ÖPNV und Fähre, Relationen, Erstattungen, Tarifkatalog | **Tabelle „Erstattungen im Einzelnen“ zeigt einzelne Bestellungen** (Bestellnummer, Betrag) |
 | 9 | 4 — Betrieb und Störungen | Erfolgsquote, Durchlaufzeit, Abbrüche, Plattformen, Arbeitslisten | **Tabelle „Schultickets zum Erwachsenenpreis“ zeigt einzelne Bestellungen** (Bestellnummer, Kauftag, Produkt, Preis, Status) |
+| 10 | 5 — Monatsbilanz Abo | Berechtigte mit App-Konto, Abo und gültigem Ticket im Monat, Kundenbindung, Alter, PLZ | Summen, PLZ-Tabelle mit kleinen Fallzahlen |
+| 11 | 6 — Abo-Verlängerung | Nächster Abrechnungstag, fällige und verlängerte Abos, gestörte Abos | nur Summen |
+| 12 | 7 — App-Nutzung | Konten, Neuanmeldungen, Einwilligungen, Kaufverhalten | nur Summen |
+
+Board 3 hieß bis Oktober 2026 „3 — Einzeltickets über PayOne“, die ID ist gleich geblieben.
+Die IDs 10–12 gelten für die Demo. Auf dem Produktivserver nennt `docker compose run --rm reports`
+sie am Ende (`Board-IDs: 1=6, 2=7, …`).
 
 - Die Dashboards haben **keine Filter**. Das Token braucht deshalb keine Parameter.
 - Die IDs gelten für die **Demo**. Auf dem Produktivserver können sie anders lauten.
@@ -66,7 +73,7 @@ bekommt:
 ```bash
 METABASE_URL=http://localhost:3030
 METABASE_EMBED_SECRET=<aus hilfecenter-lokal.env>
-METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
+METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9,monatsbilanz:10,verlaengerung:11,nutzung:12
 ```
 
 - **Euer Server braucht keine Verbindung zu Metabase.** Er signiert nur das Token. Das
@@ -77,7 +84,7 @@ METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
 - **HTTPS-Hilfecenter mit `http://localhost`-iframe:** Das erlauben Chrome und Firefox, weil
   `localhost` als sicher gilt. Andere Hostnamen als `localhost` gehen nur mit HTTPS.
 - Lokal ist jede einbettende Seite erlaubt, eine Freigabe der Adresse braucht es hier nicht.
-- Zum Gegenprüfen: Dashboard 6, Kachel „Umsatz brutto“ zeigt **81.926 €**.
+- Zum Gegenprüfen: Dashboard 6, Kachel „Umsatz brutto“ zeigt mit den Demodaten vom 21.10.2026 **451.706,97 €**.
 
 ---
 
@@ -88,7 +95,7 @@ METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
 ```bash
 METABASE_URL=https://reporting.swl-innovation.de
 METABASE_EMBED_SECRET=…                   # aus dem Secret-Store, nie im Repository
-METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9
+METABASE_DASHBOARDS=ueberblick:6,abo:7,payone:8,betrieb:9,monatsbilanz:<ID>,verlaengerung:<ID>,nutzung:<ID>
 ```
 
 ### 3.2 Token erzeugen — nur auf dem Server

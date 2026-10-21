@@ -146,6 +146,12 @@ pruefe   "Datenbanken angelegt"                  "imptest_mpswl imptest_reportin
 pruefe   "Dumps archiviert"                      2 "$(dateien archiv)"
 BASIS=$(bestellungen)
 enthaelt "Status geschrieben"                    '"dump_tag": "20260901"' "$(lauf --status)"
+enthaelt "Statistik aufgefrischt"                "Statistik der Fremdtabellen aufgefrischt" "$AUSGABE"
+if [ "$("${PSQL[@]}" -d imptest_reporting -c "SELECT to_regprocedure('rpt.monatsstand_schreiben()') IS NOT NULL")" = t ]; then
+  enthaelt "Monatsstand geschrieben"             "Monatsstand geschrieben (4 Segmente)" "$AUSGABE"
+else
+  echo "  --      Monatsstand: übersprungen (13_app_reports.sql nicht eingespielt)"
+fi
 
 echo "2. Dasselbe Paar noch einmal"
 cp "$T/archiv/"* "$T/eingang/"

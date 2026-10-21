@@ -17,6 +17,7 @@
 #   5. Austausch per RENAME: <db> -> <db>_alt, <db>_neu -> <db>
 #   6. Rauchtest über die Reporting-Sichten, bei Fehler sofort zurücktauschen
 #   7. Dumps archivieren, Status schreiben, Altes aufräumen
+#   8. Statistik und Monatsstand im Reporting (Warnung, kein Abbruch)
 #
 # Bei jedem Fehler: Exit 1, Dumps nach fehler/, alte Daten bleiben aktiv.
 # Läuft auf Linux (Server) und macOS (lokaler Test), bash >= 3.2.
@@ -319,6 +320,29 @@ cat > "$STATUS/letzter_import.json" <<EOF
  "dateien": ["$(basename "$F_MPSWL")", "$(basename "$F_SWL")"],
  "mengen": {$MENGEN}, "rauchtest": $ERGEBNIS}
 EOF
+
+# --- 8. Nacharbeiten im Reporting (nicht kritisch) --------------------
+# Statistik der Fremdtabellen auffrischen: ohne sie plant PostgreSQL in den
+# Sichten Schleifen über postgres_fdw (Minuten statt Sekunden). Danach die
+# tägliche Momentaufnahme der Monatsbilanz (rpt.monatsstand), falls die
+# Reporting-Sichten aus metabase-setup/13_app_reports.sql eingespielt sind.
+if db_da "$DB_REPORTING"; then
+  if "${PSQL[@]}" -At -d "$DB_REPORTING" >/dev/null 2>&1 <<'SQL'
+SELECT format('ANALYZE %I.%I', foreign_table_schema, foreign_table_name)
+FROM information_schema.foreign_tables
+WHERE foreign_table_schema IN ('src_mpswl', 'src_swl') \gexec
+SQL
+  then log "  Statistik der Fremdtabellen aufgefrischt"
+  else log "  WARNUNG: Statistik der Fremdtabellen nicht aufgefrischt — Dashboards können langsam sein"
+  fi
+  if [ "$(sql "$DB_REPORTING" "SELECT to_regprocedure('rpt.monatsstand_schreiben()') IS NOT NULL" 2>/dev/null)" = t ]; then
+    if N=$(sql "$DB_REPORTING" "SELECT rpt.monatsstand_schreiben()" 2>&1); then
+      log "  Monatsstand geschrieben ($N Segmente)"
+    else
+      log "  WARNUNG: Monatsstand nicht geschrieben: $N"
+    fi
+  fi
+fi
 
 # Dumps enthalten Personendaten: nicht länger als nötig aufheben
 find "$ARCHIV" "$FEHLER" -type f -name 'kk_*' -ctime +"$ARCHIV_TAGE" -print -delete | sed 's/^/  gelöscht: /'
