@@ -664,6 +664,7 @@ Wichtig: Dieselbe Metabase-Version wie zum Zeitpunkt der Sicherung verwenden, un
 | `/var/backups/luemobil` | Abfrageprotokoll | 30 Tage | nur `postgres` (700) |
 | `metabase_app` | Metabase-Konten (Name, E-Mail), keine Kundendaten | dauerhaft | nur `metabase_app` |
 | Metabase-Frage „Kundenliste nach Ticket (9995 / 9999)" | E-Mail, Name, Abo-Kundennummer, PLZ, Ort aller Abo-Berechtigten, Versandstatus des Tickets; als CSV ladbar | jeweils aktueller Stand; heruntergeladene CSV-Dateien liegen beim Bearbeiter | Metabase-Konten mit Zugriff auf die Sammlung „LüMobil Vertrieb", nicht eingebettet |
+| Metabase-Fragen „Konten ohne Ticket – Liste", „Gestörte Abos, offen – Liste" | E-Mail, Name, PLZ, Ort; Fahrgast mit Geburtsdatum | jeweils aktueller Stand | per Klick aus den Boards 2, 4, 5, 6 — nur in Metabase, nicht im eingebetteten Hilfecenter |
 | Metabase-Frage „Gestörte Abos – Klärliste" | Fahrgast (Name, Geburtsdatum), E-Mail und Name des Kontoinhabers je stillgelegtem Abo; als CSV ladbar | jeweils aktueller Stand; CSV-Dateien beim Bearbeiter | wie die Kundenliste, nicht eingebettet |
 | Dashboard „4 — Betrieb und Störungen" | Tabelle mit einzelnen Bestellungen (Bestellnummer) | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |
 | Dashboard „3 — Einzeltickets und PayOne" | Tabelle „Erstattungen im Einzelnen“ mit Bestellnummer und Betrag | jeweils aktueller Stand | wer das Dashboard im Hilfecenter sieht |

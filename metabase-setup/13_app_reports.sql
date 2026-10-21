@@ -555,6 +555,44 @@ LEFT JOIN rpt.kunde_360 c  ON c.kunde_id = k.kunde_id
 LEFT JOIN rpt.bestellung b ON b.bestellung_id = k.bestellung_id;
 
 -- =====================================================================
+-- rpt.konto_ohne_ticket — Berechtigte mit App-Konto, aber ohne Ticket im Monat
+-- =====================================================================
+-- Fast alle haben ihr Konto mit dem Abo-Kundenkonto verknüpft (OVS), das
+-- Ticket in der App aber nie angefordert: keine Bestellung, kein Warenkorb.
+-- Die Plattform steht nur an Bestellungen — wer nie bestellt hat, hat keine.
+CREATE OR REPLACE VIEW rpt.konto_ohne_ticket AS
+WITH stichtag AS (
+  SELECT max(kauftag) AS tag FROM rpt.bestellung
+), ovs AS MATERIALIZED (
+  SELECT DISTINCT customers_id FROM src_mpswl.kk_customers_to_tag WHERE name = 'OVS_CUSTOMER_ID'
+), geraet AS MATERIALIZED (
+  SELECT kunde_id, string_agg(DISTINCT plattform, ', ') AS plattform
+  FROM rpt.bestellung WHERE plattform <> 'unbekannt' GROUP BY kunde_id
+)
+SELECT
+  p.kunde_email, k.kunde_id, k.name AS kontoinhaber,
+  p.segment, p.plz, p.ort, p.altersgruppe, p.bestandsmonat,
+  k.registriert_am,
+  (SELECT tag FROM stichtag) - k.registriert_am       AS tage_seit_anlage,
+  k.bestellungen, k.bestellungen_erfolgreich, k.letzter_kauf,
+  (o.customers_id IS NOT NULL)                       AS ovs_verknuepft,
+  p.aktives_abo, p.abo_gestoert AS abo_stillgelegt, p.ticket_vormonat,
+  g.plattform,
+  CASE WHEN k.bestellungen = 0             THEN 1
+       WHEN k.bestellungen_erfolgreich = 0 THEN 2
+       WHEN p.aktives_abo                  THEN 3
+       ELSE 4 END                                    AS fall_nr,
+  CASE WHEN k.bestellungen = 0             THEN 'Ticket nie angefordert'
+       WHEN k.bestellungen_erfolgreich = 0 THEN 'Bestellung gescheitert'
+       WHEN p.aktives_abo                  THEN 'aktives Abo, Ticket fehlt'
+       ELSE 'früher Ticket, jetzt ohne Abo' END      AS fall
+FROM rpt.berechtigte_person p
+JOIN rpt.kunde_360 k ON k.kunde_email = p.kunde_email
+LEFT JOIN ovs o      ON o.customers_id = k.kunde_id
+LEFT JOIN geraet g   ON g.kunde_id = k.kunde_id
+WHERE p.app_konto AND NOT p.ticket_im_monat;
+
+-- =====================================================================
 -- rpt.bestellergebnis — wie jede Bestellung ausging (vor allem PayOne)
 -- =====================================================================
 CREATE OR REPLACE VIEW rpt.bestellergebnis AS

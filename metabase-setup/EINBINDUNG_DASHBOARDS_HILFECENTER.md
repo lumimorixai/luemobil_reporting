@@ -36,6 +36,9 @@ Seite „Kennzahlen“ ─────────▶ 1. Ist die Person angemeld
 | 11 | 6 — Abo-Verlängerung | Nächster Abrechnungstag, fällige und verlängerte Abos, gestörte Abos | nur Summen |
 | 12 | 7 — App-Nutzung | Konten, Neuanmeldungen, Einwilligungen, Kaufverhalten | nur Summen |
 
+Einige Kacheln öffnen in Metabase per Klick eine Liste mit Personendaten. Eingebettet ist
+das abgeschaltet: Im Hilfecenter erscheinen nur die Zahlen.
+
 Board 3 hieß bis Oktober 2026 „3 — Einzeltickets über PayOne“, die ID ist gleich geblieben.
 Die IDs 10–12 gelten für die Demo. Auf dem Produktivserver nennt `docker compose run --rm reports`
 sie am Ende (`Board-IDs: 1=6, 2=7, …`).

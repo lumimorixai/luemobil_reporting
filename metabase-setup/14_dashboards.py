@@ -251,6 +251,20 @@ frage("Ticketquote im Monat", f"""SELECT ticketquote_prozent AS "Quote" {GESAMT}
 frage("Konto, aber kein Ticket", f"""SELECT konto_ohne_ticket AS "Personen" {GESAMT}""", "scalar",
     "App-Konto vorhanden, aber kein gültiges Ticket im Monat. Wer das ist: Kundenliste.",
     zahl("Personen"))
+frage("Ticket nie angefordert",
+    """SELECT count(*) AS "Konten" FROM rpt.konto_ohne_ticket WHERE fall_nr = 1""", "scalar",
+    "Berechtigte mit App-Konto, fast alle mit dem Abo-Kundenkonto verknüpft, die das Ticket in der App "
+    "nie angefordert haben: keine Bestellung, kein Warenkorb. Klick: Liste (nur in Metabase).",
+    zahl("Konten"))
+frage("Konten ohne Ticket nach Anlagewoche",
+    """SELECT date_trunc('week', registriert_am)::date AS "Woche",
+              count(*) FILTER (WHERE fall_nr = 1) AS "Ticket nie angefordert",
+              count(*) FILTER (WHERE fall_nr = 2) AS "Bestellung gescheitert",
+              count(*) FILTER (WHERE fall_nr > 2) AS "Sonstige"
+       FROM rpt.konto_ohne_ticket GROUP BY 1 ORDER BY 1""", "bar",
+    "Wann die Konten ohne Ticket angelegt wurden. Frische Konten holen das Ticket oft noch, ältere kaum.",
+    {**balken("Woche", ["Ticket nie angefordert", "Bestellung gescheitert", "Sonstige"], [AMBER, ROT, GRAU], True),
+     **spalten(Woche=DAT)})
 frage("Hochlaufkette im Monat",
     """SELECT v.schritt AS "Schritt", v.n AS "Personen"
        FROM rpt.monatsbilanz b,
@@ -406,6 +420,21 @@ def text(inhalt, col, row, w, h, i):
 def kopf(titel, inhalt):  # Kopfzeile: Text links, Datenstand rechts
     return [("TEXT", f"## {titel}\n{inhalt}", 0, 0, 18, 2), ("Datenstand", 18, 0, 6, 2)]
 
+# Klick auf eine Kachel öffnet eine Liste mit Personendaten (12_kundenliste.py).
+# Nur in Metabase selbst: Eingebettete Boards erlauben kein Durchklicken.
+KLICK = {
+    "Ticket nie angefordert":     "Konten ohne Ticket – Liste",
+    "Konto, aber kein Ticket":    "Konten ohne Ticket – Liste",
+    "Gestörte Abos, offen":       "Gestörte Abos, offen – Liste",
+    "Gestörte Abos nach Klärung": "Gestörte Abos – Klärliste",
+}
+fehlende_ziele = sorted({z for z in KLICK.values() if z not in vorhanden})
+def klick(kartenname):
+    ziel = KLICK.get(kartenname)
+    if not ziel or ziel not in vorhanden: return {}
+    return {"click_behavior": {"type": "link", "linkType": "question",
+                               "targetId": vorhanden[ziel], "parameterMapping": {}}}
+
 fehler_raster = []
 def board(name, beschreibung, elemente, frueher=()):
     alle = call(f"/api/collection/{COLL}/items?models=dashboard")["data"]
@@ -426,7 +455,7 @@ def board(name, beschreibung, elemente, frueher=()):
         else:
             k, col, row, w, h = el
             karten.append({"id": -i, "card_id": K.get(k) or vorhanden[k], "row": row, "col": col,
-                           "size_x": w, "size_y": h, "visualization_settings": {},
+                           "size_x": w, "size_y": h, "visualization_settings": klick(k),
                            "parameter_mappings": []})
         if col + w > 24: fehler_raster.append(f"{name}: {el[0]} ragt über Spalte 24")
         for r in range(row, row + h):
@@ -501,7 +530,10 @@ B[5] = board("5 — Monatsbilanz Abo", "Wer im laufenden Monat ein gültiges Abo
   ("Hochlaufkette im Monat", 0, 5, 12, 7), ("Monatsbilanz je Segment", 12, 5, 12, 7),
   ("Abo-Tickets je Monat", 0, 12, 12, 7), ("Kundenbindung je Monat", 12, 12, 12, 7),
   ("Ticketquote nach Altersgruppe", 0, 19, 12, 8), ("Ticketquote nach Postleitzahl", 12, 19, 12, 8),
-  ("Verlauf der Monatsbilanz", 0, 27, 24, 6)])
+  ("Ticket nie angefordert", 0, 27, 6, 3), ("Konten ohne Ticket nach Anlagewoche", 6, 27, 18, 6),
+  ("TEXT", "Klick auf die Zahl öffnet die Liste der Konten, nur in Metabase selbst, nicht im Hilfecenter.",
+   0, 30, 6, 3),
+  ("Verlauf der Monatsbilanz", 0, 33, 24, 6)])
 
 B[6] = board("6 — Abo-Verlängerung", "Der Verlängerungslauf am 27. und die Kundenbindung.", [
   *kopf("Abo-Verlängerung", "Am Abrechnungstag (27.) stellt das System für alle aktiven Abos das Ticket "
@@ -532,6 +564,9 @@ B[7] = board("7 — App-Nutzung", "Konten, Einwilligungen und Kaufverhalten in d
 # Nicht mehr auf einem Board: archivieren statt löschen
 for alt in ("Gestörte Abos nach Produkt",):
     if alt in vorhanden: call(f"/api/card/{vorhanden[alt]}", {"archived": True}, m="PUT")
+
+if fehlende_ziele:
+    print("  Hinweis: Klick-Ziele fehlen, erst 12_kundenliste.py ausführen:", ", ".join(fehlende_ziele))
 
 if fehler_raster:
     print("RASTER:", *fehler_raster, sep="\n  "); sys.exit(1)

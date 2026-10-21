@@ -126,12 +126,29 @@ für die Einbettung freigegeben, keines zeigt E-Mail-Adressen oder Namen.
 | **2 — Abo-Bestand** | Berechtigungen, Aktivierungsquote, offenes Potenzial, aktive Abos, Trichter, Segmente, Altersprofil, Arbeitslisten, PLZ-Tabelle |
 | **3 — Einzeltickets und PayOne** | PayOne-Bestellungen, Erfolgsquote (gesamt und 7 Tage), Umsatz ÖPNV und Fähre, Verlauf je Tag, Ausgang (abgelehnt, abgebrochen, Aufräumjob, erstattet), Produkte, **Relationen**, Tageszeit, Plattform, Erstattungen; darunter der Tarifkatalog |
 | **4 — Betrieb und Störungen** | Erfolgsquote, Abbrüche, Durchlaufzeit, Bestellstrecke, Abbrüche nach Ausgang, Plattform, Arbeitslisten (jetzt 12 Listen), Tarifausnahmen |
-| **5 — Monatsbilanz Abo** (neu) | Berechtigte → App-Konto → aktives Abo → **gültiges Ticket im Monat**, je Segment, verlängert/neu je Monat, Kundenbindung, nach Alter und PLZ, täglicher Verlauf |
+| **5 — Monatsbilanz Abo** (neu) | Berechtigte → App-Konto → aktives Abo → **gültiges Ticket im Monat**, je Segment, verlängert/neu je Monat, Kundenbindung, nach Alter und PLZ, **Ticket nie angefordert** (nach Anlagewoche), täglicher Verlauf |
 | **6 — Abo-Verlängerung** (neu) | Nächster Abrechnungstag, fällige Abos, Folgemonat schon ausgestellt, Lauf je Ausstellungstag, Kundenbindung, gestörte Abos |
 | **7 — App-Nutzung** (neu) | Konten, neue Konten (7/30 Tage), Käufer in 30 Tagen, Einwilligungen je Kontaktweg, Bestellungen je Konto, Wochentag, Plattform, Registrierungsmonat |
 
 Geprüft mit den Daten vom 21.10.2026: alle Kacheln liefern Daten, keine braucht mehr als
 2,2 Sekunden (alle zusammen 35 Sekunden).
+
+**Klick auf eine Kachel öffnet die Liste dahinter** (nur in Metabase selbst; eingebettete
+Boards erlauben kein Durchklicken, die Personendaten bleiben also im Hilfecenter unsichtbar):
+
+| Kachel | öffnet |
+|---|---|
+| „Ticket nie angefordert“, „Konto, aber kein Ticket“ (Board 5) | „Konten ohne Ticket – Liste“: E-Mail, Name, Ticket, PLZ, Anlagedatum, Fall |
+| „Gestörte Abos, offen“ (Boards 2, 4, 6) | „Gestörte Abos, offen – Liste“: Fahrgast, Konto, Stilllegung |
+| „Gestörte Abos nach Klärung“ (Board 6) | „Gestörte Abos – Klärliste“: alle mit Klärung |
+
+Die Listen legt `12_kundenliste.py` an, die Verknüpfung setzt `14_dashboards.py`.
+
+**Ticket nie angefordert:** Von 394 Berechtigten mit App-Konto ohne Ticket im Oktober haben 388
+nie bestellt. 387 davon haben ihr Konto mit dem Abo-Kundenkonto verknüpft (OVS), aber keinen
+Warenkorb angelegt — der Schritt „Ticket anfordern“ fehlt. Die **Plattform** (iOS/Android)
+steht nur an Bestellungen und ist für diese Konten deshalb unbekannt; das weiß nur der
+App-Anbieter.
 
 **Logins** wertet kein Board aus: `customers_info_date_last_logon` ist in der Quelle bei
 7.506 von 7.529 Konten leer.

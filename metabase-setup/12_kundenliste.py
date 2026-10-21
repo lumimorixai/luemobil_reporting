@@ -229,18 +229,41 @@ KLAER_SQL = """SELECT klaerung AS "Klärung", abo_code AS "Abo-Code", produkt AS
        berechtigt_im_monat AS "Berechtigt im Monat", bestandsmonat AS "Bestandsmonat"
 FROM rpt.abo_stoerung
 ORDER BY klaerung_nr = 4 DESC, klaerung_nr, "E-Mail Konto", "Fahrgast\""""
-k_alt = next((c for c in call(f"/api/collection/{COLL}/items?models=card")["data"] if c["name"] == KLAER), None)
-k_karte = {"name": KLAER, "collection_id": COLL, "display": "table",
-           "description": "Jedes als gestört markierte (stillgelegte) Abo mit Klärung über den Fahrgast. "
-                          "Handlungsbedarf nur bei „offen“. Enthält Personendaten — nicht weitergeben, nicht einbetten.",
-           "dataset_query": {"type": "native", "database": db_id, "native": {"query": KLAER_SQL}},
-           "visualization_settings": {"column_settings": {
-               json.dumps(["name", n], separators=(",", ":")): DAT
-               for n in ("Läuft seit", "Letzte Abrechnung", "Stillgelegt am", "Bestandsmonat")}}}
-if k_alt:
-    call(f"/api/card/{k_alt['id']}", k_karte, m="PUT"); kid = k_alt["id"]
-else:
-    kid = call("/api/card", k_karte)["id"]
+def liste_sichern(name, sql, beschreibung, datumsspalten=()):
+    """Gespeicherte Liste mit Personendaten: in der Sammlung, auf keinem Board.
+    Die Boards (14_dashboards.py) verlinken per Klick hierher."""
+    alt = next((c for c in call(f"/api/collection/{COLL}/items?models=card")["data"]
+                if c["name"] == name), None)
+    karte = {"name": name, "collection_id": COLL, "display": "table",
+             "description": beschreibung + " Enthält Personendaten — nicht weitergeben, nicht einbetten.",
+             "dataset_query": {"type": "native", "database": db_id, "native": {"query": sql}},
+             "visualization_settings": {"column_settings": {
+                 json.dumps(["name", n], separators=(",", ":")): DAT for n in datumsspalten}}}
+    if alt:
+        call(f"/api/card/{alt['id']}", karte, m="PUT"); return alt["id"]
+    return call("/api/card", karte)["id"]
+
+kid = liste_sichern(KLAER, KLAER_SQL,
+    "Jedes als gestört markierte (stillgelegte) Abo mit Klärung über den Fahrgast. "
+    "Handlungsbedarf nur bei „offen“.",
+    ("Läuft seit", "Letzte Abrechnung", "Stillgelegt am", "Bestandsmonat"))
+liste_sichern("Gestörte Abos, offen – Liste",
+    KLAER_SQL.replace("FROM rpt.abo_stoerung\n", "FROM rpt.abo_stoerung\nWHERE klaerung_nr = 4\n"),
+    "Stillgelegte Abos, deren Fahrgast berechtigt ist, aber weder Abo noch Ticket hat: "
+    "die Fälle für den Service.",
+    ("Läuft seit", "Letzte Abrechnung", "Stillgelegt am", "Bestandsmonat"))
+liste_sichern("Konten ohne Ticket – Liste",
+    """SELECT fall AS "Fall", kunde_email AS "E-Mail", kontoinhaber AS "Kontoinhaber",
+       segment AS "Ticket", plz AS "PLZ", ort AS "Ort", altersgruppe AS "Altersgruppe",
+       registriert_am AS "Konto angelegt", tage_seit_anlage AS "Tage seit Anlage",
+       ovs_verknuepft AS "Mit Abo-Kundenkonto verknüpft", bestellungen AS "Bestellungen",
+       abo_stillgelegt AS "Abo stillgelegt", ticket_vormonat AS "Ticket im Vormonat",
+       coalesce(plattform, '–') AS "Plattform (aus Bestellungen)"
+FROM rpt.konto_ohne_ticket
+ORDER BY fall_nr, registriert_am, kunde_email""",
+    "Berechtigte mit App-Konto, aber ohne Ticket im laufenden Monat. Meist ist das Konto mit "
+    "dem Abo-Kundenkonto verknüpft, das Ticket aber nie angefordert.",
+    ("Konto angelegt",))
 
 def klaerliste(formatiert=False):
     daten = {"format_rows": "true"} if formatiert else {}
