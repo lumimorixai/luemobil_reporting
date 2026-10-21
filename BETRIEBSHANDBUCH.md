@@ -149,10 +149,14 @@ df -h /var/lib/docker                        # 10 GB frei reichen
 Verzeichnis wird **nicht verschoben** — der Import liest von dort und trägt die Dumps
 anschließend nach `/srv/luemobil/archiv` aus dem Chroot heraus.
 
-Seit Oktober 2026 liefert der Lieferant **Produktion und Entwicklung** gemeinsam, jeweils
-als ZIP. Nur der Unterordner **`upload/prod`** ist der Eingang des Imports
-(`DUMPS_VERZEICHNIS` in der `.env`). Was in anderen Unterordnern liegt, fasst er nicht an.
-Am Dateinamen allein lassen sich Produktion und Entwicklung nicht unterscheiden.
+Seit Oktober 2026 liefert der Lieferant **Produktion und Entwicklung**, jeweils als ZIP.
+Eingang des Imports ist der Unterordner **`upload/prod`** (`DUMPS_VERZEICHNIS` in der
+`.env`). **Auch dort liegen Entwicklungsdumps**, und am Dateinamen sind sie nicht zu
+unterscheiden — sie tragen sogar spätere Uhrzeiten. Der Import prüft deshalb den Inhalt:
+Produktion verweist auf `https://prod.tafmobile.de`, Entwicklung auf
+`https://dev.tafmobile.de` (`PROD_MERKMAL` / `FREMD_MERKMAL` in der `import.conf`).
+Entwicklungsdumps legt er nach `/srv/luemobil/archiv/entwicklung/`, nach 7 Tagen werden sie
+gelöscht.
 
 ```bash
 install -d -o root -g root -m 755 /srv/luemobil /etc/luemobil
@@ -398,7 +402,7 @@ systemctl list-timers 'luemobil-*'
 ```bash
 cd /opt/luemobil_reporting
 
-# Import: 47 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
+# Import: 55 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
 # (nimmt die Dumps auch als .zip oder .gz, z. B. die zuletzt archivierten)
 docker compose run --rm --entrypoint /opt/luemobil/test_import.sh import \
   /srv/luemobil/archiv/<mpswl-dump>.zip /srv/luemobil/archiv/<swl-dump>.zip
@@ -421,6 +425,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://reporting.swl-innovation.de/
 
 ### 5.1 So läuft ein Import
 
+0. **Herkunft:** Jeder Dump in `upload/prod` wird durchsucht. Nur Produktivdumps bleiben im Spiel, Entwicklungsdumps kommen nach `archiv/entwicklung/`. Ein Dump mit keinem oder beiden Merkmalen bricht den Lauf ab.
 1. **Suchen:** neuestes `kk_mpswl-*` und `kk_swl-*` in `upload/prod`, als `.zip`, `.sql.zip`, `.sql` oder `.sql.gz`, mit oder ohne `-PROD-` im Namen. Ältere, liegen gebliebene Dumps werden übersprungen und archiviert.
 2. **Warten, falls nötig:** Fehlt der Partner-Dump, wartet der Import bis zu 6 Stunden. Wird eine Datei noch geschrieben, wartet er auf den nächsten Lauf.
 3. **Vollständigkeit:** ZIP unbeschädigt und mit genau einem Dump, Endzeile von `pg_dump` vorhanden, beide Dumps vom selben Tag, Paar noch nicht importiert (SHA-256-Register).
@@ -540,6 +545,9 @@ Neue Dashboards, die das Hilfecenter zeigen soll, brauchen die Einbettungsfreiga
 
 | Meldung / Symptom | Ursache | Vorgehen |
 |---|---|---|
+| `… Herkunft nicht erkennbar — enthält weder https://prod.tafmobile.de noch …` | Ein Dump verweist auf keinen oder beide TAF-Hosts, z. B. weil sich die Hostnamen geändert haben | `unzip -p <datei> \| grep -o -m3 'https://[a-z.-]*tafmobile[a-z.]*'` — neuen Host als `PROD_MERKMAL`/`FREMD_MERKMAL` in `/etc/luemobil/import.conf`, Datei aus `fehler/` zurück nach `upload/prod/` |
+| `Entwicklungsdump, nicht importiert: …` | Normalfall, kein Fehler | Nichts zu tun |
+| `kk_mpswl.customers: nur 141 Zeilen (Minimum 1000)` | Vor Oktober 2026: Entwicklungsdump wurde für Produktion gehalten | Mit der Herkunftsprüfung behoben. Die Produktivdumps desselben Tages liegen dann in `archiv/` („Übersprungen“): zurück nach `upload/prod/` (6.1) |
 | `… ist beschädigt oder kein ZIP-Archiv` | Upload abgebrochen, oder die Datei heißt `.zip`, ist aber keins | Lieferant informieren, neu hochladen lassen |
 | `… enthält N Dateien statt genau eines Dumps` | Mehrere Dumps (oder ein Ordner) in einem ZIP | Lieferant: ein Dump je ZIP. Von Hand: auspacken, je Dump ein ZIP, zurück nach `upload/prod` (6.1) |
 | `Keine neuen Dumps im Eingang`, obwohl der Lieferant hochgeladen hat | Dateien liegen nicht in `upload/prod`, oder der Name passt nicht (`kk_mpswl-JJJJMMTThhmmss.zip`) | `ls -l /srv/sftp/tafreporting/upload/*/`; `DUMPS_VERZEICHNIS` in der `.env` prüfen |
@@ -799,7 +807,7 @@ sshd -t && systemctl reload ssh
 | | |
 |---|---|
 | Zugang | `sftp dumpupload@<server>`, landet direkt in `/eingang` |
-| Ablage | Produktion in `prod/`, Entwicklung in einem anderen Unterordner. Nur `prod/` wird importiert |
+| Ablage | `prod/`. Liegen dort auch Entwicklungsdumps, erkennt der Import sie am Inhalt (`dev.tafmobile.de`) und importiert sie nicht |
 | Dateinamen | `kk_mpswl-JJJJMMTThhmmss.zip` und `kk_swl-JJJJMMTThhmmss.zip` (seit Oktober 2026), je ZIP genau ein Dump. Ebenfalls angenommen: `.sql.zip`, `.sql`, `.sql.gz` und das frühere Schema mit `-PROD-` vor dem Zeitstempel |
 | Format | `pg_dump` im Klartextformat aus PostgreSQL 17, vollständig, mit der Endzeile `-- PostgreSQL database dump complete` |
 | Paar | Beide Dumps vom selben Kalendertag, im Abstand von höchstens 6 Stunden |
@@ -1050,13 +1058,14 @@ cd /opt/luemobil_reporting/import
 sudo -u postgres ./test_import.sh \
   "$(ls -t /srv/luemobil/archiv/kk_mpswl-* | head -1)" \
   "$(ls -t /srv/luemobil/archiv/kk_swl-* | head -1)"
-# Erwartet: 47 bestanden, 0 fehlgeschlagen
+# Erwartet: 55 bestanden, 0 fehlgeschlagen
 ```
 
 Er prüft: Erstimport, doppelte Lieferung, Austausch bei offener Sitzung, abgeschnittener Dump,
 Dump mit SQL-Fehler, eingebrochene Datenmenge, Rückbau bei fehlgeschlagenem Rauchtest,
 fehlender Partner-Dump, parallele Läufe, Wächter, neues Namensschema als ZIP neben einem alten
-Dump, `.sql.zip`, beschädigtes ZIP, ZIP mit zwei Dateien, leerer Eingang.
+Dump, `.sql.zip`, beschädigtes ZIP, ZIP mit zwei Dateien, Entwicklungsdumps mit späterer
+Uhrzeit neben den Produktivdumps, Dump ohne Herkunftsmerkmal, leerer Eingang.
 
 **API** — von einem freigegebenen Rechner:
 

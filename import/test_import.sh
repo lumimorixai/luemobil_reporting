@@ -42,7 +42,8 @@ EOF
 lauf() { IMPORT_CONF="$T/import.conf" "$HIER/import.sh" "$@" 2>&1; }
 
 ablegen() {  # ablegen <tag JJJJMMTT> [variante] [nur: mpswl|swl] [form: sql|zip|sqlzip]
-  # Varianten: normal|abgeschnitten|kaputt|weniger, bei ZIP auch zipkaputt|zipzwei
+  # Varianten: normal|abgeschnitten|kaputt|weniger|ohnemerkmal, bei ZIP auch zipkaputt|zipzwei,
+  #            entwicklung (beide Dumps aus der Entwicklung, Uhrzeit 6 s später)
   # Form sql:    kk_<db>-PROD-<tag>020000.sql        (Namensschema bis Oktober 2026)
   #      zip:    kk_<db>-<tag>0200SS.zip             (Lieferung ab Oktober 2026)
   #      sqlzip: kk_<db>-<tag>0200SS.sql.zip
@@ -51,11 +52,16 @@ ablegen() {  # ablegen <tag JJJJMMTT> [variante] [nur: mpswl|swl] [form: sql|zip
     local name="${paar%%:*}" rest="${paar#*:}"; local quelle="${rest%:*}" sek="${rest##*:}"
     [ -n "$nur" ] && [ "kk_$nur" != "$name" ] && continue
     local ziel="$T/eingang/$name-PROD-${tag}020000.sql"
+    [ "$art" = entwicklung ] && sek=$(printf '%02d' $((10#$sek + 6)))
     [ "$form" = sql ] || ziel="$T/eingang/$name-${tag}0200${sek}.sql"
     { echo "-- Testvariante $tag $art"; cat "$quelle"; } > "$ziel"
+    if [ "$art" = entwicklung ]; then  # Herkunft umschreiben, wie ein Dump aus der Entwicklung
+      sed 's#https://prod\.tafmobile\.de#https://dev.tafmobile.de#g' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel"
+    fi
     if [ "$name" = kk_mpswl ]; then
       case "$art" in
         abgeschnitten) head -c $(( $(wc -c < "$ziel") / 2 )) "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
+        ohnemerkmal)   sed 's#https://prod\.tafmobile\.de#https://example.invalid#g' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
         kaputt)        awk '{print} /^CREATE TABLE public.orders / && !x {print "DAS IST KEIN SQL;"; x=1}' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
         weniger)       awk '/^COPY public.orders \(/ {b=1; n=0; print; next}
                             b && /^\\\.$/ {b=0}
@@ -252,7 +258,25 @@ pruefe   "Exit 1"                                1 "$RC"
 enthaelt "Grund genannt"                         "enthält 2 Dateien statt genau eines Dumps" "$AUSGABE"
 pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
 
-echo "15. Leerer Eingang"
+echo "15. Entwicklungsdumps mit späterer Uhrzeit neben den Produktivdumps"
+ablegen 20260912 normal "" zip
+ablegen 20260912 entwicklung "" zip
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 0"                                0 "$RC"
+enthaelt "Entwicklung mpswl beiseite"           "Entwicklungsdump, nicht importiert: kk_mpswl-20260912020017.zip" "$AUSGABE"
+enthaelt "Entwicklung swl beiseite"             "Entwicklungsdump, nicht importiert: kk_swl-20260912020015.zip" "$AUSGABE"
+enthaelt "Produktivpaar importiert"            "Importiere Paar vom 20260912: kk_mpswl-20260912020011.zip, kk_swl-20260912020009.zip" "$AUSGABE"
+pruefe   "Entwicklungsdumps in archiv/entwicklung" 2 "$(dateien archiv/entwicklung)"
+
+echo "16. Dump ohne Herkunftsmerkmal"
+ablegen 20260913 ohnemerkmal
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 1"                                1 "$RC"
+enthaelt "Grund genannt"                         "Herkunft nicht erkennbar" "$AUSGABE"
+pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
+rm -f "$T/eingang/"*   # der Partner (kk_swl) wartet sonst bis zu 6 Stunden
+
+echo "17. Leerer Eingang"
 enthaelt "Nichts zu tun, Exit 0"                 "Keine neuen Dumps" "$(lauf)"
 
 echo

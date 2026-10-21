@@ -18,6 +18,14 @@ DB_REPORTING=lue_reporting
 # ohne Anmelderecht an:
 DUMP_ROLLEN="postgres"
 
+# --- Herkunft --------------------------------------------------------
+# Produktion und Entwicklung kommen in denselben Ordner (upload/prod) und
+# sind am Namen nicht zu unterscheiden. Ein Dump gilt als Produktion, wenn er
+# PROD_MERKMAL enthält und FREMD_MERKMAL nicht. Entwicklungsdumps wandern
+# nach archiv/entwicklung, Dumps mit keinem oder beiden Merkmalen nach fehler/.
+PROD_MERKMAL="https://prod.tafmobile.de"
+FREMD_MERKMAL="https://dev.tafmobile.de"
+
 # --- Plausibilität ---------------------------------------------------
 MIN_KUNDEN=1000                  # weniger Konten in kk_mpswl.customers = Fehler
 MIN_BESTELLUNGEN=1000            # weniger Bestellungen = Fehler

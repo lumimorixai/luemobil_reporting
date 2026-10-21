@@ -9,6 +9,7 @@
 # Konfiguration: $IMPORT_CONF, sonst /etc/luemobil/import.conf
 #
 # Ablauf (Details im BETRIEBSHANDBUCH.md):
+#   0. Herkunft: nur Produktivdumps (PROD_MERKMAL), Entwicklungsdumps beiseite
 #   1. Paar kk_mpswl-*.sql + kk_swl-*.sql vom selben Tag suchen
 #      (Namen und Formate: siehe DUMPNAME unten)
 #   2. Vollständig? (ZIP intakt, Endmarke von pg_dump, Datei seit Minuten unverändert)
@@ -39,6 +40,11 @@ CONF="${IMPORT_CONF:-/etc/luemobil/import.conf}"
 # Anmelderecht an — sonst scheitert jedes ALTER ... OWNER TO im Dump.
 : "${DUMP_ROLLEN:=postgres}"
 : "${RAUCHTEST_SQL:=SELECT count(*) FROM rpt.bestellposition}"
+# Herkunft eines Dumps: Der Lieferant legt Produktion und Entwicklung in
+# denselben Ordner, am Namen sind sie nicht zu unterscheiden. Jeder Dump
+# verweist aber auf "seinen" TAF-Host.
+: "${PROD_MERKMAL:=https://prod.tafmobile.de}"
+: "${FREMD_MERKMAL:=https://dev.tafmobile.de}"
 
 PSQL=(psql -X -q -v ON_ERROR_STOP=1)
 export PGOPTIONS="${PGOPTIONS:-} -c client_min_messages=warning"
@@ -130,6 +136,49 @@ neuester() {  # neuester <prefix> -> Pfad der neuesten passenden Datei
   dumps "$1" | tail -1 | sed "s|^|$EINGANG/|"
 }
 tag() { basename "$1" | sed -E 's/^kk_[a-z]+-(PROD-)?([0-9]{8}).*/\2/'; }
+
+lesbar_oder_fehler() {
+  [ -r "$1" ] || fehler "$(basename "$1") ist nicht lesbar. Der Import läuft als uid $(id -u); die Datei gehört $(stat -c '%U:%G mit %a' "$1" 2>/dev/null || stat -f '%Su:%Sg mit %Lp' "$1"). Abhilfe: chmod 644 auf die Datei (das Verzeichnis bleibt geschlossen)."
+}
+umgebung() {  # umgebung <datei> -> produktion | entwicklung | unbekannt
+  local treffer np nf
+  treffer=$(lesen "$1" 2>/dev/null | grep -a -o -F -e "$PROD_MERKMAL" -e "$FREMD_MERKMAL" | sort | uniq -c || true)
+  np=$(awk -v m="$PROD_MERKMAL"  '$2 == m {print $1}' <<<"$treffer")
+  nf=$(awk -v m="$FREMD_MERKMAL" '$2 == m {print $1}' <<<"$treffer")
+  if [ -n "$np" ] && [ -z "$nf" ]; then echo produktion
+  elif [ -n "$nf" ] && [ -z "$np" ]; then echo entwicklung
+  else echo unbekannt; fi
+}
+
+# --- 0. Herkunft prüfen: nur Produktivdumps bleiben im Spiel ----------
+# Erst wenn alle Dateien fertig hochgeladen sind — eine halbe Datei kann das
+# Merkmal noch nicht enthalten.
+for name in $(dumps 'kk_(mpswl|swl)'); do
+  f="$EINGANG/$name"
+  ALTER_MIN=$(( ($(date +%s) - $(ankunft "$f")) / 60 ))
+  if [ "$ALTER_MIN" -lt "$RUHEZEIT_MINUTEN" ]; then
+    log "$name wurde vor ${ALTER_MIN} min noch geschrieben — nächster Lauf."; exit 0
+  fi
+done
+for name in $(dumps 'kk_(mpswl|swl)'); do
+  f="$EINGANG/$name"
+  lesbar_oder_fehler "$f"
+  case "$(umgebung "$f")" in
+    produktion) ;;
+    entwicklung)
+      mkdir -p "$ARCHIV/entwicklung"
+      mv "$f" "$ARCHIV/entwicklung/" && log "Entwicklungsdump, nicht importiert: $name" ;;
+    *)
+      PAAR=("$f")  # die genaueste Meldung zuerst: kaputtes ZIP, abgeschnittener Dump
+      case "$f" in *.zip)
+        unzip -tqq "$f" >/dev/null 2>&1 || fehler "$name ist beschädigt oder kein ZIP-Archiv."
+      esac
+      [[ "$(lesen "$f" 2>/dev/null | tail -c 2000)" == *"-- PostgreSQL database dump complete"* ]] \
+        || fehler "$name ist unvollständig (Endmarke von pg_dump fehlt)."
+      fehler "$name: Herkunft nicht erkennbar — enthält weder $PROD_MERKMAL noch $FREMD_MERKMAL, oder beides." ;;
+  esac
+done
+PAAR=()
 F_MPSWL=$(neuester kk_mpswl)
 F_SWL=$(neuester kk_swl)
 
@@ -174,9 +223,7 @@ for f in "$F_MPSWL" "$F_SWL"; do
 done
 PAAR=("$F_MPSWL" "$F_SWL")
 
-for f in "$F_MPSWL" "$F_SWL"; do
-  [ -r "$f" ] || fehler "$(basename "$f") ist nicht lesbar. Der Import läuft als uid $(id -u); die Datei gehört $(stat -c '%U:%G mit %a' "$f" 2>/dev/null || stat -f '%Su:%Sg mit %Lp' "$f"). Abhilfe: chmod 644 auf die Datei (das Verzeichnis bleibt geschlossen)."
-done
+for f in "$F_MPSWL" "$F_SWL"; do lesbar_oder_fehler "$f"; done
 
 for f in "$F_MPSWL" "$F_SWL"; do
   case "$f" in *.zip)

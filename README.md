@@ -65,7 +65,7 @@ Einzelheiten in [`metabase-setup/README.md`](metabase-setup/README.md) und
 ## Tests
 
 ```bash
-import/test_import.sh <mpswl-dump> <swl-dump>   # 47 Prüfungen, eigene Testdatenbanken (.sql oder .zip)
+import/test_import.sh <mpswl-dump> <swl-dump>   # 55 Prüfungen, eigene Testdatenbanken (.sql oder .zip)
 ticket-api/test.sh                              # 28 Prüfungen gegen die laufende API
 metabase-setup/einbettung_pruefen.py            # Einbettung der Dashboards
 ```
