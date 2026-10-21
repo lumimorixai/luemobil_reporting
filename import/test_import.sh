@@ -2,7 +2,7 @@
 # =====================================================================
 # Abnahmetest für import.sh — lokal und auf dem Server ausführbar.
 #
-#   ./test_import.sh <kk_mpswl-dump.sql> <kk_swl-dump.sql>
+#   ./test_import.sh <kk_mpswl-dump> <kk_swl-dump>     (.sql, .sql.gz, .zip, .sql.zip)
 #
 # Arbeitet NUR mit eigenen Testdatenbanken (imptest_mpswl, imptest_swl,
 # imptest_reporting) und einem temporären Verzeichnis. Die echten
@@ -41,12 +41,17 @@ EOF
 }
 lauf() { IMPORT_CONF="$T/import.conf" "$HIER/import.sh" "$@" 2>&1; }
 
-ablegen() {  # ablegen <tag JJJJMMTT> [variante: normal|abgeschnitten|kaputt|weniger] [nur: mpswl|swl]
-  local tag="$1" art="${2:-normal}" nur="${3:-}"
-  for paar in "kk_mpswl:$QUELLE_MPSWL" "kk_swl:$QUELLE_SWL"; do
-    local name="${paar%%:*}" quelle="${paar#*:}"
+ablegen() {  # ablegen <tag JJJJMMTT> [variante] [nur: mpswl|swl] [form: sql|zip|sqlzip]
+  # Varianten: normal|abgeschnitten|kaputt|weniger, bei ZIP auch zipkaputt|zipzwei
+  # Form sql:    kk_<db>-PROD-<tag>020000.sql        (Namensschema bis Oktober 2026)
+  #      zip:    kk_<db>-<tag>0200SS.zip             (Lieferung ab Oktober 2026)
+  #      sqlzip: kk_<db>-<tag>0200SS.sql.zip
+  local tag="$1" art="${2:-normal}" nur="${3:-}" form="${4:-sql}"
+  for paar in "kk_mpswl:$QUELLE_MPSWL:11" "kk_swl:$QUELLE_SWL:09"; do
+    local name="${paar%%:*}" rest="${paar#*:}"; local quelle="${rest%:*}" sek="${rest##*:}"
     [ -n "$nur" ] && [ "kk_$nur" != "$name" ] && continue
     local ziel="$T/eingang/$name-PROD-${tag}020000.sql"
+    [ "$form" = sql ] || ziel="$T/eingang/$name-${tag}0200${sek}.sql"
     { echo "-- Testvariante $tag $art"; cat "$quelle"; } > "$ziel"
     if [ "$name" = kk_mpswl ]; then
       case "$art" in
@@ -57,6 +62,17 @@ ablegen() {  # ablegen <tag JJJJMMTT> [variante: normal|abgeschnitten|kaputt|wen
                             b {n++; if (n > 100) next}
                             {print}' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
       esac
+    fi
+    if [ "$form" != sql ]; then  # wie geliefert: ein Dump je ZIP, gleicher Name
+      local zipdatei="${ziel%.sql}.zip"; [ "$form" = sqlzip ] && zipdatei="$ziel.zip"
+      (cd "$T/eingang" && zip -q -j "$zipdatei" "$(basename "$ziel")") && rm "$ziel"
+      if [ "$name" = kk_mpswl ]; then
+        case "$art" in
+          zipkaputt) head -c $(( $(wc -c < "$zipdatei") / 2 )) "$zipdatei" > "$zipdatei.x" && mv "$zipdatei.x" "$zipdatei" ;;
+          zipzwei)   echo "-- zweite Datei" > "$T/zweite.sql" && zip -q -j "$zipdatei" "$T/zweite.sql" ;;
+        esac
+      fi
+      ziel="$zipdatei"
     fi
     touch -t "${tag:0:8}0300" "$ziel"
   done
@@ -73,7 +89,16 @@ trap aufraeumen EXIT
 
 # --- Vorbereitung ----------------------------------------------------
 echo "Vorbereitung (Testverzeichnis $T)"
-aufraeumen; mkdir -p "$T/eingang"
+aufraeumen; mkdir -p "$T/eingang" "$T/quelle"
+auspacken() {  # auspacken <datei> <name> -> Pfad eines unkomprimierten Dumps
+  case "$1" in
+    *.zip) unzip -p "$1" > "$T/quelle/$2.sql" && echo "$T/quelle/$2.sql" ;;
+    *.gz)  gzip -dc "$1" > "$T/quelle/$2.sql" && echo "$T/quelle/$2.sql" ;;
+    *)     echo "$1" ;;
+  esac
+}
+QUELLE_MPSWL=$(auspacken "$QUELLE_MPSWL" mpswl) || { echo "Konnte $QUELLE_MPSWL nicht auspacken."; exit 1; }
+QUELLE_SWL=$(auspacken "$QUELLE_SWL" swl)       || { echo "Konnte $QUELLE_SWL nicht auspacken."; exit 1; }
 "${PSQL[@]}" -d postgres -c "CREATE DATABASE imptest_reporting"
 for rolle in api_eigentuemer hilfecenter; do   # Rollen, auf die sich Rechte im Schema beziehen
   "${PSQL[@]}" -d postgres -c "DO \$\$BEGIN CREATE ROLE $rolle NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$"
@@ -191,7 +216,37 @@ enthaelt "Frischer Import: ok"                   "OK: letzter Import" "$(lauf --
 touch -t 202601010000 "$T/status/letzter_import.json"
 lauf --pruefen >/dev/null; pruefe "Veralteter Import: Exit 1" 1 "$?"
 
-echo "11. Leerer Eingang"
+echo "11. Neues Namensschema als ZIP, daneben ein liegengebliebener alter Dump"
+ablegen 20260907 normal mpswl
+ablegen 20260908 normal "" zip
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 0"                                0 "$RC"
+enthaelt "Paar erkannt"                          "Importiere Paar vom 20260908: kk_mpswl-20260908020011.zip, kk_swl-20260908020009.zip" "$AUSGABE"
+enthaelt "Alter Dump übersprungen"               "Übersprungen (es gibt einen neueren): kk_mpswl-PROD-20260907020000.sql" "$AUSGABE"
+enthaelt "Rauchtest über Reporting-Sichten"      "Rauchtest ok" "$AUSGABE"
+pruefe   "Eingang leer"                          0 "$(dateien eingang)"
+
+echo "12. ZIP mit Endung .sql.zip"
+ablegen 20260909 normal "" sqlzip
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 0"                                0 "$RC"
+enthaelt "Paar erkannt"                          "kk_mpswl-20260909020011.sql.zip" "$AUSGABE"
+
+echo "13. Beschädigtes ZIP"
+ablegen 20260910 zipkaputt "" zip
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 1"                                1 "$RC"
+enthaelt "Grund genannt"                         "beschädigt oder kein ZIP-Archiv" "$AUSGABE"
+pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
+
+echo "14. ZIP mit zwei Dateien"
+ablegen 20260911 zipzwei "" zip
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 1"                                1 "$RC"
+enthaelt "Grund genannt"                         "enthält 2 Dateien statt genau eines Dumps" "$AUSGABE"
+pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
+
+echo "15. Leerer Eingang"
 enthaelt "Nichts zu tun, Exit 0"                 "Keine neuen Dumps" "$(lauf)"
 
 echo

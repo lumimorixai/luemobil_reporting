@@ -9,8 +9,9 @@
 # Konfiguration: $IMPORT_CONF, sonst /etc/luemobil/import.conf
 #
 # Ablauf (Details im BETRIEBSHANDBUCH.md):
-#   1. Paar kk_mpswl-PROD-*.sql + kk_swl-PROD-*.sql vom selben Tag suchen
-#   2. Vollständig? (Endmarke von pg_dump, Datei seit Minuten unverändert)
+#   1. Paar kk_mpswl-*.sql + kk_swl-*.sql vom selben Tag suchen
+#      (Namen und Formate: siehe DUMPNAME unten)
+#   2. Vollständig? (ZIP intakt, Endmarke von pg_dump, Datei seit Minuten unverändert)
 #   3. In <db>_neu einspielen — die laufenden Datenbanken bleiben unberührt
 #   4. Plausibilität: Mindestmengen, kein Einbruch gegenüber gestern
 #   5. Austausch per RENAME: <db> -> <db>_alt, <db>_neu -> <db>
@@ -51,7 +52,7 @@ mtime()  { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 # als mtime, das z. B. "sftp put -p" oder "rsync -t" vom Quellsystem übernimmt.
 ankunft() { stat -c %Z "$1" 2>/dev/null || stat -f %c "$1"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
-lesen()  { case "$1" in *.gz) gzip -dc "$1" ;; *) cat "$1" ;; esac; }
+lesen()  { case "$1" in *.gz) gzip -dc "$1" ;; *.zip) unzip -p "$1" ;; *) cat "$1" ;; esac; }
 sql()    { "${PSQL[@]}" -At -d "$1" -c "$2"; }
 db_da()  { [ "$(sql postgres "SELECT count(*) FROM pg_database WHERE datname = '$1'")" = 1 ]; }
 
@@ -116,9 +117,18 @@ archivieren() {  # Dumps wegräumen — misslingt das, ist es nur eine Warnung
 }
 
 # --- 1. Dump-Paar finden ---------------------------------------------
-neuester() {  # neuester <prefix> -> Pfad der neuesten passenden Datei
-  ls -1 "$EINGANG" 2>/dev/null | grep -E "^$1-PROD-[0-9]{14}\.sql(\.gz)?$" | sort | tail -1 | sed "s|^|$EINGANG/|" || true
+# Angenommen werden kk_<db>-JJJJMMTThhmmss mit .sql, .sql.gz, .sql.zip oder .zip,
+# wahlweise mit -PROD- vor dem Zeitstempel (Namensschema bis Oktober 2026).
+# Eine ZIP-Datei muss genau einen Dump enthalten.
+DUMPNAME='-(PROD-)?[0-9]{14}(\.sql(\.gz|\.zip)?|\.zip)'
+dumps() {  # dumps <regex-präfix> -> passende Dateinamen, nach Zeitstempel sortiert
+  ls -1 "$EINGANG" 2>/dev/null | grep -E "^$1$DUMPNAME\$" \
+    | sed -E 's/^(kk_[a-z]+-(PROD-)?)([0-9]{14})(.*)$/\3 &/' | sort | cut -d' ' -f2 || true
 }
+neuester() {  # neuester <prefix> -> Pfad der neuesten passenden Datei
+  dumps "$1" | tail -1 | sed "s|^|$EINGANG/|"
+}
+tag() { basename "$1" | sed -E 's/^kk_[a-z]+-(PROD-)?([0-9]{8}).*/\2/'; }
 F_MPSWL=$(neuester kk_mpswl)
 F_SWL=$(neuester kk_swl)
 
@@ -135,8 +145,8 @@ if [ -z "$F_MPSWL" ] || [ -z "$F_SWL" ]; then
   fehler "Seit ${WARTEZEIT} min nur $(basename "$DA") vorhanden — zweiter Dump fehlt."
 fi
 
-TAG_MPSWL=$(basename "$F_MPSWL" | sed -E 's/.*-PROD-([0-9]{8}).*/\1/')
-TAG_SWL=$(basename "$F_SWL"     | sed -E 's/.*-PROD-([0-9]{8}).*/\1/')
+TAG_MPSWL=$(tag "$F_MPSWL")
+TAG_SWL=$(tag "$F_SWL")
 if [ "$TAG_MPSWL" != "$TAG_SWL" ]; then
   # Der ältere wartet nicht ewig: wenn der jüngere Tag auch nach der Wartezeit
   # keinen Partner hat, schlägt der Fall oben beim nächsten Lauf auf.
@@ -147,7 +157,7 @@ if [ "$TAG_MPSWL" != "$TAG_SWL" ]; then
 fi
 
 # Ältere Dumps, die über Nacht liegen geblieben sind, werden übersprungen
-for alt in $(ls -1 "$EINGANG" | grep -E '^kk_(mpswl|swl)-PROD-[0-9]{14}\.sql(\.gz)?$' | sort || true); do
+for alt in $(dumps 'kk_(mpswl|swl)'); do
   p="$EINGANG/$alt"
   if [ "$p" != "$F_MPSWL" ] && [ "$p" != "$F_SWL" ]; then
     mv "$p" "$ARCHIV/" && log "Übersprungen (es gibt einen neueren): $alt"
@@ -168,6 +178,11 @@ for f in "$F_MPSWL" "$F_SWL"; do
 done
 
 for f in "$F_MPSWL" "$F_SWL"; do
+  case "$f" in *.zip)
+    unzip -tqq "$f" >/dev/null 2>&1 || fehler "$(basename "$f") ist beschädigt oder kein ZIP-Archiv."
+    N=$(unzip -Z1 "$f" | grep -vc '/$' || true)
+    [ "$N" = 1 ] || fehler "$(basename "$f") enthält $N Dateien statt genau eines Dumps."
+  esac
   ENDE=$(lesen "$f" | tail -c 2000)
   [[ "$ENDE" == *"-- PostgreSQL database dump complete"* ]] \
     || fehler "$(basename "$f") ist unvollständig (Endmarke von pg_dump fehlt)."
@@ -306,7 +321,7 @@ cat > "$STATUS/letzter_import.json" <<EOF
 EOF
 
 # Dumps enthalten Personendaten: nicht länger als nötig aufheben
-find "$ARCHIV" "$FEHLER" -type f -name 'kk_*-PROD-*' -ctime +"$ARCHIV_TAGE" -print -delete | sed 's/^/  gelöscht: /'
+find "$ARCHIV" "$FEHLER" -type f -name 'kk_*' -ctime +"$ARCHIV_TAGE" -print -delete | sed 's/^/  gelöscht: /'
 if db_da "${DB_MPSWL}_alt"; then
   log "Import erfolgreich. Vorheriger Stand liegt als ${DB_MPSWL}_alt / ${DB_SWL}_alt bereit."
 else

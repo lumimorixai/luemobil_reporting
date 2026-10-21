@@ -45,7 +45,7 @@ Docker beschreibt Anhang A die Variante mit systemd-Diensten. Nicht im Repositor
 |---|---|
 | Docker-Abbilder (Metabase, PostgREST, PostgreSQL) | zieht `docker compose` selbst |
 | Passwörter und Schlüssel | werden auf dem Server erzeugt (4.3, 4.6) und gehören in den Tresor |
-| Dumps `kk_*-PROD-*.sql` | liefert das Quellsystem per SFTP (4.2) |
+| Dumps `kk_*-JJJJMMTThhmmss.zip` | liefert das Quellsystem per SFTP nach `upload/prod` (4.2) |
 
 **Nie einchecken:** Dumps, Schlüssel, Passwörter, die Metabase-Datei `metabase-app-db.mv.db`.
 Die `.gitignore` hält das ab — bei neuen Dateien trotzdem selbst prüfen.
@@ -65,7 +65,7 @@ Einzelheiten in [`metabase-setup/README.md`](metabase-setup/README.md) und
 ## Tests
 
 ```bash
-import/test_import.sh <mpswl-dump> <swl-dump>   # 32 Prüfungen, eigene Testdatenbanken
+import/test_import.sh <mpswl-dump> <swl-dump>   # 45 Prüfungen, eigene Testdatenbanken (.sql oder .zip)
 ticket-api/test.sh                              # 28 Prüfungen gegen die laufende API
 metabase-setup/einbettung_pruefen.py            # Einbettung der Dashboards
 ```

@@ -6,6 +6,11 @@
 # Produktiv-Dumps: echte Kundendaten, Passwort-Hashes. Nie einchecken.
 kk_*-PROD-*.sql
 kk_*-PROD-*.sql.gz
+# Lieferung ab Oktober 2026: kk_<db>-JJJJMMTThhmmss als .zip, .sql, .sql.zip, .sql.gz
+kk_*-[0-9]*.sql
+kk_*-[0-9]*.sql.gz
+kk_*-[0-9]*.zip
+kk_*-[0-9]*.sql.zip
 *.dump
 
 # --- Geheimnisse ------------------------------------------------------

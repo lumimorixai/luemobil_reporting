@@ -19,8 +19,8 @@ und die Ticket-API für das Hilfecenter.
  Lieferant (Produktion)                Server (ein VPS, alles in Docker)
  ─────────────────────                 ────────────────────────────────────────────────────
                     SFTP, nur Schlüssel
- kk_mpswl-PROD-….sql ─────────────────▶ /srv/luemobil/dumps/eingang
- kk_swl-PROD-….sql                            │  luemobil-import.timer (alle 30 min)
+ prod/kk_mpswl-….zip ─────────────────▶ /srv/sftp/tafreporting/upload/prod
+ prod/kk_swl-….zip                            │  luemobil-import.timer (alle 30 min)
                                               ▼
                                        import (Container) ── prüfen ── einspielen ── austauschen
                                               │
@@ -84,8 +84,9 @@ und die Ticket-API für das Hilfecenter.
 | `/opt/luemobil_reporting/` | root:root | 755 | Dieses Repository (Skripte, `compose.yml`) |
 | `/opt/luemobil_reporting/.env` | root:root | 600 | **Alle Passwörter und Schlüssel** des Reporting-Stacks |
 | `/etc/luemobil/import.conf` | root:root | 644 | Import-Konfiguration (in den Container gemountet) |
-| `/srv/luemobil/dumps/` | root:root | 755 | SFTP-Chroot des Lieferanten (muss root gehören) |
-| `/srv/luemobil/dumps/eingang/` | dumpupload:luemobil-dumps | 2770 | Hier kommen die Dumps an |
+| `/srv/sftp/tafreporting/` | root:root | 755 | SFTP-Chroot des Lieferanten (muss root gehören) |
+| `/srv/sftp/tafreporting/upload/` | tafreporting:sftponly, ACL `u:70:rwx` | 750 | Upload des Lieferanten |
+| `/srv/sftp/tafreporting/upload/prod/` | vom Lieferanten angelegt, ACL `u:70:rwx` + Vorgabe-ACL | wie angelegt | **Eingang des Imports:** Produktiv-Dumps als ZIP |
 | `/srv/luemobil/archiv/` | postgres:postgres | 700 | Importierte Dumps, 7 Tage |
 | `/srv/luemobil/fehler/` | postgres:postgres | 700 | Abgewiesene Dumps, 7 Tage |
 | `/var/lib/luemobil-import/` | postgres:postgres | 700 | Sperre, Import-Register, `letzter_import.json` |
@@ -148,6 +149,11 @@ df -h /var/lib/docker                        # 10 GB frei reichen
 Verzeichnis wird **nicht verschoben** — der Import liest von dort und trägt die Dumps
 anschließend nach `/srv/luemobil/archiv` aus dem Chroot heraus.
 
+Seit Oktober 2026 liefert der Lieferant **Produktion und Entwicklung** gemeinsam, jeweils
+als ZIP. Nur der Unterordner **`upload/prod`** ist der Eingang des Imports
+(`DUMPS_VERZEICHNIS` in der `.env`). Was in anderen Unterordnern liegt, fasst er nicht an.
+Am Dateinamen allein lassen sich Produktion und Entwicklung nicht unterscheiden.
+
 ```bash
 install -d -o root -g root -m 755 /srv/luemobil /etc/luemobil
 # Die Container laufen als uid 70 (postgres im Alpine-Abbild):
@@ -160,8 +166,12 @@ install -d -o 70 -g 70 -m 750 /srv/luemobil/archiv /srv/luemobil/fehler \
 apt install -y acl
 chmod 750 /srv/sftp/tafreporting/upload
 setfacl -m u:70:rwx,m::rwx /srv/sftp/tafreporting/upload
-getfacl -p /srv/sftp/tafreporting/upload | grep '^user:70'
-#   richtig:  user:70:rwx
+# Dasselbe für den Unterordner prod/. Die Vorgabe-ACL (-d) sorgt dafür, dass neue
+# Dateien dort für uid 70 lesbar sind, auch wenn der Lieferant sie mit 660 anlegt.
+setfacl -m u:70:rwx,m::rwx -d -m u:70:rwx,m::rwx /srv/sftp/tafreporting/upload/prod
+setfacl -m u:70:r /srv/sftp/tafreporting/upload/prod/* 2>/dev/null   # schon vorhandene Dateien
+getfacl -p /srv/sftp/tafreporting/upload /srv/sftp/tafreporting/upload/prod | grep '^user:70'
+#   richtig:  user:70:rwx            (je Verzeichnis)
 #   falsch:   user:70:rwx  #effective:r-x   -> Maske kappt das Schreibrecht
 
 install -o root -g root -m 644 /opt/luemobil_reporting/server/import.conf.beispiel /etc/luemobil/import.conf
@@ -194,7 +204,7 @@ melden sich damit am vorhandenen PostgreSQL an.
 
 ```bash
 # Dumps einmalig ablegen (oder den Lieferanten hochladen lassen)
-cp kk_mpswl-PROD-*.sql kk_swl-PROD-*.sql /srv/luemobil/dumps/eingang/
+cp kk_mpswl-*.zip kk_swl-*.zip /srv/sftp/tafreporting/upload/prod/
 
 cd /opt/luemobil_reporting && docker compose run --rm import
 ```
@@ -388,9 +398,10 @@ systemctl list-timers 'luemobil-*'
 ```bash
 cd /opt/luemobil_reporting
 
-# Import: 32 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
+# Import: 45 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
+# (nimmt die Dumps auch als .zip oder .gz, z. B. die zuletzt archivierten)
 docker compose run --rm --entrypoint /opt/luemobil/test_import.sh import \
-  /srv/luemobil/archiv/<mpswl-dump>.sql /srv/luemobil/archiv/<swl-dump>.sql
+  /srv/luemobil/archiv/<mpswl-dump>.zip /srv/luemobil/archiv/<swl-dump>.zip
 
 # Ticket-API aus dem Docker-Netz, wie die App sie ruft
 docker run --rm --network "$HILFECENTER_NETZ" curlimages/curl -s -X POST \
@@ -410,9 +421,9 @@ curl -s -o /dev/null -w '%{http_code}\n' https://reporting.swl-innovation.de/
 
 ### 5.1 So läuft ein Import
 
-1. **Suchen:** neuestes `kk_mpswl-PROD-*` und `kk_swl-PROD-*` im Eingang. Ältere, liegen gebliebene Dumps werden übersprungen und archiviert.
+1. **Suchen:** neuestes `kk_mpswl-*` und `kk_swl-*` in `upload/prod`, als `.zip`, `.sql.zip`, `.sql` oder `.sql.gz`, mit oder ohne `-PROD-` im Namen. Ältere, liegen gebliebene Dumps werden übersprungen und archiviert.
 2. **Warten, falls nötig:** Fehlt der Partner-Dump, wartet der Import bis zu 6 Stunden. Wird eine Datei noch geschrieben, wartet er auf den nächsten Lauf.
-3. **Vollständigkeit:** Endzeile von `pg_dump` vorhanden, beide Dumps vom selben Tag, Paar noch nicht importiert (SHA-256-Register).
+3. **Vollständigkeit:** ZIP unbeschädigt und mit genau einem Dump, Endzeile von `pg_dump` vorhanden, beide Dumps vom selben Tag, Paar noch nicht importiert (SHA-256-Register).
 4. **Einspielen** in `kk_mpswl_neu` und `kk_swl_neu`, jeweils in einer einzigen Transaktion. Die laufenden Datenbanken bleiben dabei unberührt.
 5. **Plausibilität:** Mindestmengen, und keine Tabelle ist um mehr als 5 % geschrumpft (Konten, Bestellungen, Abo-Berechtigungen, Positionen, Produkte).
 6. **Austausch** per Umbenennen: aktuell → `_alt`, `_neu` → aktuell. Dauert unter einer Sekunde. Offene Verbindungen zu den Quelldatenbanken werden getrennt, `lue_reporting` verbindet sich beim nächsten Zugriff automatisch neu (getestet).
@@ -439,13 +450,13 @@ docker compose run --rm import --status      # letzter erfolgreicher Import (JSO
 journalctl -u luemobil-import --since today  # Protokoll der Importläufe
 systemctl list-timers 'luemobil-*'           # nächste Läufe
 docker compose ps                            # laufen postgrest und metabase?
-ls -l /srv/luemobil/dumps/eingang /srv/luemobil/fehler
+ls -l /srv/sftp/tafreporting/upload/prod /srv/luemobil/fehler
 ```
 
 Beispiel eines erfolgreichen Laufs:
 
 ```
-Importiere Paar vom 20260912: kk_mpswl-PROD-20260912020000.sql, kk_swl-PROD-20260912020000.sql
+Importiere Paar vom 20261021: kk_mpswl-20261021020011.zip, kk_swl-20261021020009.zip
   kk_mpswl_neu eingespielt (2 s)
   kk_swl_neu eingespielt (2 s)
   kk_mpswl.customers: 2132 -> 2132
@@ -512,15 +523,19 @@ Hilfecenter braucht die neue Dashboard-ID.
 
 | Meldung / Symptom | Ursache | Vorgehen |
 |---|---|---|
+| `… ist beschädigt oder kein ZIP-Archiv` | Upload abgebrochen, oder die Datei heißt `.zip`, ist aber keins | Lieferant informieren, neu hochladen lassen |
+| `… enthält N Dateien statt genau eines Dumps` | Mehrere Dumps (oder ein Ordner) in einem ZIP | Lieferant: ein Dump je ZIP. Von Hand: auspacken, je Dump ein ZIP, zurück nach `upload/prod` (6.1) |
+| `Keine neuen Dumps im Eingang`, obwohl der Lieferant hochgeladen hat | Dateien liegen nicht in `upload/prod`, oder der Name passt nicht (`kk_mpswl-JJJJMMTThhmmss.zip`) | `ls -l /srv/sftp/tafreporting/upload/*/`; `DUMPS_VERZEICHNIS` in der `.env` prüfen |
+| `… ist nicht lesbar` bei Dateien in `upload/prod` | Vorgabe-ACL auf `prod/` fehlt | `setfacl` für `prod/` wie in 4.2 |
 | `… ist unvollständig (Endmarke von pg_dump fehlt)` | Upload abgebrochen oder Dump-Export beim Lieferanten fehlgeschlagen | Lieferant informieren, neu hochladen lassen. Nichts weiter zu tun |
-| `Seit … min nur kk_… vorhanden — zweiter Dump fehlt` | Lieferant hat nur einen Dump geschickt | Lieferant informieren. Wenn der zweite kommt: beide aus `fehler/` zurück nach `eingang/` (6.1) |
+| `Seit … min nur kk_… vorhanden — zweiter Dump fehlt` | Lieferant hat nur einen Dump geschickt | Lieferant informieren. Wenn der zweite kommt: beide aus `fehler/` zurück nach `upload/prod/` (6.1) |
 | `Einspielen von … fehlgeschlagen` + SQL-Fehler davor | Dump fehlerhaft, oder Quellsystem hat die PostgreSQL-Version gewechselt | Fehlerzeile im Journal lesen. Neue Hauptversion beim Lieferanten → Server-PostgreSQL angleichen |
-| `…orders: Rückgang von X auf Y Zeilen` | Export unvollständig, oder beim Lieferanten wurde tatsächlich gelöscht | Beim Lieferanten nachfragen. Ist der Rückgang echt: Grenze in `import.conf` vorübergehend anheben, Dumps zurück nach `eingang/` |
-| `Rauchtest fehlgeschlagen` + Rückbau | Schema im Quellsystem geändert (Spalte umbenannt/entfernt), Sichten passen nicht mehr | Sichten anpassen (`metabase-setup/`), dann 4.6 und 4.7.1 erneut, dann Dumps zurück nach `eingang/` |
+| `…orders: Rückgang von X auf Y Zeilen` | Export unvollständig, oder beim Lieferanten wurde tatsächlich gelöscht | Beim Lieferanten nachfragen. Ist der Rückgang echt: Grenze in `import.conf` vorübergehend anheben, Dumps zurück nach `upload/prod/` |
+| `Rauchtest fehlgeschlagen` + Rückbau | Schema im Quellsystem geändert (Spalte umbenannt/entfernt), Sichten passen nicht mehr | Sichten anpassen (`metabase-setup/`), dann 4.6 und 4.7.1 erneut, dann Dumps zurück nach `upload/prod/` |
 | `PostgreSQL 17 oder neuer nötig` | Falsche Server-Version | Siehe 4.1 |
 | `Austausch … nach 5 Versuchen nicht möglich` | Etwas hält Verbindungen zu `kk_*` offen und verbindet sich sofort neu | `SELECT datname, usename, application_name FROM pg_stat_activity WHERE datname LIKE 'kk_%'`, Verursacher abstellen |
 | `Rückbau von … fehlgeschlagen — MANUELL PRÜFEN` | Sehr unwahrscheinlich, z. B. Datenbankserver während des Tauschs abgestürzt | 6.2 |
-| Wächter-Mail `Letzter erfolgreicher Import vor … h` | Keine Dumps angekommen, oder alle Läufe gescheitert | `ls eingang/ fehler/`, `journalctl -u luemobil-import --since yesterday`. Kam nichts: Lieferant fragen |
+| Wächter-Mail `Letzter erfolgreicher Import vor … h` | Keine Dumps angekommen, oder alle Läufe gescheitert | `ls /srv/sftp/tafreporting/upload/prod /srv/luemobil/fehler`, `journalctl -u luemobil-import --since yesterday`. Kam nichts: Lieferant fragen |
 | API liefert `502` | PostgREST läuft nicht | `systemctl status postgrest-tickets`, `journalctl -u postgrest-tickets` |
 | API liefert `401` für gültiges Token | Token gesperrt/abgelaufen, oder JWT-Schlüssel geändert | `token.sh liste` |
 | API liefert `500` nach Arbeiten an den Sichten | Rechte auf `rpt`-Sichten verloren (siehe Achtung in 4.6) | 4.7.1 erneut ausführen |
@@ -543,7 +558,7 @@ Hilfecenter braucht die neue Dashboard-ID.
 ### 6.1 Dumps erneut importieren
 
 ```bash
-mv /srv/luemobil/fehler/kk_*-PROD-JJJJMMTT*.sql /srv/luemobil/dumps/eingang/
+mv /srv/luemobil/fehler/kk_*-JJJJMMTT*.zip /srv/sftp/tafreporting/upload/prod/
 cd /opt/luemobil_reporting && docker compose run --rm import      # oder: systemctl start luemobil-import
 ```
 
@@ -759,7 +774,8 @@ sshd -t && systemctl reload ssh
 | | |
 |---|---|
 | Zugang | `sftp dumpupload@<server>`, landet direkt in `/eingang` |
-| Dateinamen | `kk_mpswl-PROD-JJJJMMTThhmmss.sql` und `kk_swl-PROD-JJJJMMTThhmmss.sql`, wahlweise mit `.gz` |
+| Ablage | Produktion in `prod/`, Entwicklung in einem anderen Unterordner. Nur `prod/` wird importiert |
+| Dateinamen | `kk_mpswl-JJJJMMTThhmmss.zip` und `kk_swl-JJJJMMTThhmmss.zip` (seit Oktober 2026), je ZIP genau ein Dump. Ebenfalls angenommen: `.sql.zip`, `.sql`, `.sql.gz` und das frühere Schema mit `-PROD-` vor dem Zeitstempel |
 | Format | `pg_dump` im Klartextformat aus PostgreSQL 17, vollständig, mit der Endzeile `-- PostgreSQL database dump complete` |
 | Paar | Beide Dumps vom selben Kalendertag, im Abstand von höchstens 6 Stunden |
 | Zeitpunkt | beliebig, der Server sieht alle 30 Minuten nach |
@@ -1007,14 +1023,15 @@ Jeder fehlgeschlagene Dienst verschickt eine Mail an `MELDUNG_AN` mit den letzte
 ```bash
 cd /opt/luemobil_reporting/import
 sudo -u postgres ./test_import.sh \
-  "$(ls -t /srv/luemobil/archiv/kk_mpswl-PROD-*.sql | head -1)" \
-  "$(ls -t /srv/luemobil/archiv/kk_swl-PROD-*.sql | head -1)"
-# Erwartet: 32 bestanden, 0 fehlgeschlagen   (Dumps unkomprimiert übergeben)
+  "$(ls -t /srv/luemobil/archiv/kk_mpswl-* | head -1)" \
+  "$(ls -t /srv/luemobil/archiv/kk_swl-* | head -1)"
+# Erwartet: 45 bestanden, 0 fehlgeschlagen
 ```
 
 Er prüft: Erstimport, doppelte Lieferung, Austausch bei offener Sitzung, abgeschnittener Dump,
 Dump mit SQL-Fehler, eingebrochene Datenmenge, Rückbau bei fehlgeschlagenem Rauchtest,
-fehlender Partner-Dump, parallele Läufe, Wächter, leerer Eingang.
+fehlender Partner-Dump, parallele Läufe, Wächter, neues Namensschema als ZIP neben einem alten
+Dump, `.sql.zip`, beschädigtes ZIP, ZIP mit zwei Dateien, leerer Eingang.
 
 **API** — von einem freigegebenen Rechner:
 
