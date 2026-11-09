@@ -276,17 +276,39 @@ einspielen "$DB_SWL"   "$F_SWL"
 
 # --- 4. Plausibilität ------------------------------------------------
 zahl() { sql "$1" "SELECT count(*) FROM $2" 2>/dev/null || echo ""; }
-pruefe_menge() {  # pruefe_menge <db> <tabelle> <minimum>
-  local db="$1" tab="$2" min="$3" neu alt
+# Zeilen des neuesten Monats als "JJJJ-MM|anzahl", leer ohne Daten
+monatszahl() {  # monatszahl <db> <tabelle> <datumsspalte>
+  sql "$1" "SELECT to_char(m, 'YYYY-MM') || '|' || count(*) FROM $2,
+              (SELECT date_trunc('month', max($3)) AS m FROM $2) n
+            WHERE date_trunc('month', $3) = m GROUP BY m" 2>/dev/null || echo ""
+}
+rueckgang() {  # rueckgang <alt> <neu> <bezeichnung>
+  if [ -n "$1" ] && [ "$1" -gt 0 ] && [ $(( $2 * 100 )) -lt $(( $1 * (100 - MAX_RUECKGANG_PROZENT) )) ]; then
+    fehler "$3: Rückgang von $1 auf $2 Zeilen (mehr als ${MAX_RUECKGANG_PROZENT} %)."
+  fi
+}
+pruefe_menge() {  # pruefe_menge <db> <tabelle> <minimum> [datumsspalte]
+  # Mit Datumsspalte: Bestand in Monatsscheiben. Der Lieferant hält den
+  # Folgemonat zeitweise neben dem laufenden und löscht den Vormonat später,
+  # die Gesamtzahl halbiert sich dann. Verglichen wird der neueste Monat.
+  local db="$1" tab="$2" min="$3" spalte="${4:-}" neu alt a="" n="" zusatz=""
   neu=$(zahl "${db}_neu" "$tab")
   [ -n "$neu" ] || fehler "$db: Tabelle $tab fehlt im neuen Dump."
   [ "$neu" -ge "$min" ] || fehler "$db.$tab: nur $neu Zeilen (Minimum $min)."
   if db_da "$db"; then
     alt=$(zahl "$db" "$tab")
-    if [ -n "$alt" ] && [ "$alt" -gt 0 ] && [ $(( neu * 100 )) -lt $(( alt * (100 - MAX_RUECKGANG_PROZENT) )) ]; then
-      fehler "$db.$tab: Rückgang von $alt auf $neu Zeilen (mehr als ${MAX_RUECKGANG_PROZENT} %)."
+    if [ -n "$spalte" ]; then
+      a=$(monatszahl "$db" "$tab" "$spalte"); n=$(monatszahl "${db}_neu" "$tab" "$spalte")
     fi
-    log "  $db.$tab: $alt -> $neu"
+    if [ -n "$a" ] && [ -n "$n" ]; then
+      [[ "${n%|*}" < "${a%|*}" ]] \
+        && fehler "$db.$tab: neuester Monat ist ${n%|*}, bisher ${a%|*}."
+      rueckgang "${a#*|}" "${n#*|}" "$db.$tab, neuester Monat ${n%|*}"
+      zusatz=" (neuester Monat ${a%|*}: ${a#*|} -> ${n%|*}: ${n#*|})"
+    else
+      rueckgang "$alt" "$neu" "$db.$tab"
+    fi
+    log "  $db.$tab: $alt -> $neu$zusatz"
   else
     log "  $db.$tab: $neu (Erstimport)"
   fi
@@ -295,7 +317,7 @@ pruefe_menge() {  # pruefe_menge <db> <tabelle> <minimum>
 MENGEN=""
 pruefe_menge "$DB_MPSWL" customers                  "$MIN_KUNDEN"
 pruefe_menge "$DB_MPSWL" orders                     "$MIN_BESTELLUNGEN"
-pruefe_menge "$DB_MPSWL" abo_berechtigungen_luebeck 1
+pruefe_menge "$DB_MPSWL" abo_berechtigungen_luebeck 1 display_validity_begin
 pruefe_menge "$DB_SWL"   orders                     "$MIN_BESTELLUNGEN"
 pruefe_menge "$DB_SWL"   orders_products            "$MIN_BESTELLUNGEN"
 pruefe_menge "$DB_SWL"   products                   1

@@ -402,7 +402,7 @@ systemctl list-timers 'luemobil-*'
 ```bash
 cd /opt/luemobil_reporting
 
-# Import: 55 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
+# Import: 61 Prüfungen mit eigenen Testdatenbanken, fasst die echten nicht an
 # (nimmt die Dumps auch als .zip oder .gz, z. B. die zuletzt archivierten)
 docker compose run --rm --entrypoint /opt/luemobil/test_import.sh import \
   /srv/luemobil/archiv/<mpswl-dump>.zip /srv/luemobil/archiv/<swl-dump>.zip
@@ -430,7 +430,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://reporting.swl-innovation.de/
 2. **Warten, falls nötig:** Fehlt der Partner-Dump, wartet der Import bis zu 6 Stunden. Wird eine Datei noch geschrieben, wartet er auf den nächsten Lauf.
 3. **Vollständigkeit:** ZIP unbeschädigt und mit genau einem Dump, Endzeile von `pg_dump` vorhanden, beide Dumps vom selben Tag, Paar noch nicht importiert (SHA-256-Register).
 4. **Einspielen** in `kk_mpswl_neu` und `kk_swl_neu`, jeweils in einer einzigen Transaktion. Die laufenden Datenbanken bleiben dabei unberührt.
-5. **Plausibilität:** Mindestmengen, und keine Tabelle ist um mehr als 5 % geschrumpft (Konten, Bestellungen, Abo-Berechtigungen, Positionen, Produkte).
+5. **Plausibilität:** Mindestmengen, und keine Tabelle ist um mehr als 5 % geschrumpft (Konten, Bestellungen, Abo-Berechtigungen, Positionen, Produkte). Bei den Abo-Berechtigungen zählt nur der neueste Monat (`display_validity_begin`): Der Lieferant hält den Folgemonat zeitweise neben dem laufenden und löscht den Vormonat später, die Gesamtzahl halbiert sich dann regulär. Der neueste Monat darf außerdem nicht älter werden.
 6. **Austausch** per Umbenennen: aktuell → `_alt`, `_neu` → aktuell. Dauert unter einer Sekunde. Offene Verbindungen zu den Quelldatenbanken werden getrennt, `lue_reporting` verbindet sich beim nächsten Zugriff automatisch neu (getestet).
 7. **Rauchtest:** `SELECT count(*) FROM rpt.bestellposition` muss > 0 liefern. Wenn nicht, wird sofort zurückgetauscht.
 8. **Abschluss:** Dumps ins Archiv, Status nach `/var/lib/luemobil-import/letzter_import.json`, Dumps älter als 7 Tage löschen.
@@ -560,6 +560,7 @@ Neue Dashboards, die das Hilfecenter zeigen soll, brauchen die Einbettungsfreiga
 | `… ist unvollständig (Endmarke von pg_dump fehlt)` | Upload abgebrochen oder Dump-Export beim Lieferanten fehlgeschlagen | Lieferant informieren, neu hochladen lassen. Nichts weiter zu tun |
 | `Seit … min nur kk_… vorhanden — zweiter Dump fehlt` | Lieferant hat nur einen Dump geschickt | Lieferant informieren. Wenn der zweite kommt: beide aus `fehler/` zurück nach `upload/prod/` (6.1) |
 | `Einspielen von … fehlgeschlagen` + SQL-Fehler davor | Dump fehlerhaft, oder Quellsystem hat die PostgreSQL-Version gewechselt | Fehlerzeile im Journal lesen. Neue Hauptversion beim Lieferanten → Server-PostgreSQL angleichen |
+| `…abo_berechtigungen_luebeck, neuester Monat …: Rückgang` oder `neuester Monat ist …, bisher …` | Im aktuellen Monat fehlen Berechtigte, oder der Bestand ist älter als der bisherige | Beim Lieferanten nachfragen. Ein wegfallender Vormonat löst diese Meldung nicht aus |
 | `…orders: Rückgang von X auf Y Zeilen` | Export unvollständig, oder beim Lieferanten wurde tatsächlich gelöscht | Beim Lieferanten nachfragen. Ist der Rückgang echt: Grenze in `import.conf` vorübergehend anheben, Dumps zurück nach `upload/prod/` |
 | `Rauchtest fehlgeschlagen` + Rückbau | Schema im Quellsystem geändert (Spalte umbenannt/entfernt), Sichten passen nicht mehr | Sichten anpassen (`metabase-setup/`), dann 4.6 und 4.7.1 erneut, dann Dumps zurück nach `upload/prod/` |
 | `PostgreSQL 17 oder neuer nötig` | Falsche Server-Version | Siehe 4.1 |
@@ -1065,14 +1066,16 @@ cd /opt/luemobil_reporting/import
 sudo -u postgres ./test_import.sh \
   "$(ls -t /srv/luemobil/archiv/kk_mpswl-* | head -1)" \
   "$(ls -t /srv/luemobil/archiv/kk_swl-* | head -1)"
-# Erwartet: 55 bestanden, 0 fehlgeschlagen
+# Erwartet: 61 bestanden, 0 fehlgeschlagen
 ```
 
 Er prüft: Erstimport, doppelte Lieferung, Austausch bei offener Sitzung, abgeschnittener Dump,
 Dump mit SQL-Fehler, eingebrochene Datenmenge, Rückbau bei fehlgeschlagenem Rauchtest,
 fehlender Partner-Dump, parallele Läufe, Wächter, neues Namensschema als ZIP neben einem alten
 Dump, `.sql.zip`, beschädigtes ZIP, ZIP mit zwei Dateien, Entwicklungsdumps mit späterer
-Uhrzeit neben den Produktivdumps, Dump ohne Herkunftsmerkmal, leerer Eingang.
+Uhrzeit neben den Produktivdumps, Dump ohne Herkunftsmerkmal, Monatswechsel im
+Berechtigungsbestand (Vormonat fällt weg: Import läuft), Einbruch im laufenden Monat (Abbruch),
+leerer Eingang.
 
 **API** — von einem freigegebenen Rechner:
 

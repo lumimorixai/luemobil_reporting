@@ -42,7 +42,7 @@ EOF
 lauf() { IMPORT_CONF="$T/import.conf" "$HIER/import.sh" "$@" 2>&1; }
 
 ablegen() {  # ablegen <tag JJJJMMTT> [variante] [nur: mpswl|swl] [form: sql|zip|sqlzip]
-  # Varianten: normal|abgeschnitten|kaputt|weniger|ohnemerkmal, bei ZIP auch zipkaputt|zipzwei,
+  # Varianten: normal|abgeschnitten|kaputt|weniger|bestandhalb|ohnemerkmal, bei ZIP auch zipkaputt|zipzwei,
   #            entwicklung (beide Dumps aus der Entwicklung, Uhrzeit 6 s später)
   # Form sql:    kk_<db>-PROD-<tag>020000.sql        (Namensschema bis Oktober 2026)
   #      zip:    kk_<db>-<tag>0200SS.zip             (Lieferung ab Oktober 2026)
@@ -66,6 +66,10 @@ ablegen() {  # ablegen <tag JJJJMMTT> [variante] [nur: mpswl|swl] [form: sql|zip
         weniger)       awk '/^COPY public.orders \(/ {b=1; n=0; print; next}
                             b && /^\\\.$/ {b=0}
                             b {n++; if (n > 100) next}
+                            {print}' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
+        bestandhalb)   awk '/^COPY public.abo_berechtigungen_luebeck \(/ {b=1; n=0; print; next}
+                            b && /^\\\.$/ {b=0}
+                            b {n++; if (n % 2) next}
                             {print}' "$ziel" > "$ziel.x" && mv "$ziel.x" "$ziel" ;;
       esac
     fi
@@ -276,7 +280,29 @@ enthaelt "Grund genannt"                         "Herkunft nicht erkennbar" "$AU
 pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
 rm -f "$T/eingang/"*   # der Partner (kk_swl) wartet sonst bis zu 6 Stunden
 
-echo "17. Leerer Eingang"
+echo "17. Monatswechsel im Berechtigungsbestand: Vormonat fällt weg"
+# Vorher zwei Monate (Vormonat als Kopie mit neuen IDs), der neue Dump nur noch einen
+"${PSQL[@]}" -d imptest_mpswl <<'SQL'
+CREATE TEMP TABLE vormonat AS SELECT * FROM abo_berechtigungen_luebeck;
+UPDATE vormonat SET id = id + 100000000,
+  display_validity_begin = display_validity_begin - interval '1 month',
+  display_validity_end   = display_validity_begin - interval '1 day';
+INSERT INTO abo_berechtigungen_luebeck SELECT * FROM vormonat;
+SQL
+ablegen 20260914
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 0"                                0 "$RC"
+enthaelt "Neuester Monat verglichen"             "abo_berechtigungen_luebeck: " "$(echo "$AUSGABE" | grep "neuester Monat")"
+
+echo "18. Berechtigungsbestand bricht im laufenden Monat ein"
+ablegen 20260915 bestandhalb
+AUSGABE=$(lauf); RC=$?
+pruefe   "Exit 1"                                1 "$RC"
+enthaelt "Grund genannt"                         "abo_berechtigungen_luebeck, neuester Monat" "$AUSGABE"
+enthaelt "Grund genannt"                         "Rückgang" "$AUSGABE"
+pruefe   "Daten unverändert"                     "$BASIS" "$(bestellungen)"
+
+echo "19. Leerer Eingang"
 enthaelt "Nichts zu tun, Exit 0"                 "Keine neuen Dumps" "$(lauf)"
 
 echo
